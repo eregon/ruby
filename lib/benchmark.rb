@@ -173,7 +173,6 @@ module Benchmark
     STDOUT.sync = true
     label_width ||= 0
     fmtstr ||= FMTSTR
-    raise ArgumentError, "no block" unless iterator?
     print caption
     results = yield(Report.new(label_width, fmtstr))
     Array === results and results.grep(Tms).each {|t|
