@@ -126,8 +126,8 @@ module Benchmark
 
   BENCHMARK_VERSION = "2002-04-25" #:nodoc"
 
-  def Benchmark::times() # :nodoc:
-    Process::times()
+  def Benchmark.times # :nodoc:
+    Process.times
   end
 
 
@@ -256,14 +256,14 @@ module Benchmark
     puts '-'*(width+CAPTION.length - "Rehearsal ".length)
     list = []
     job.list.each{|label,item|
-      print(label.ljust(width))
+      print label.ljust(width)
       res = Benchmark::measure(&item)
-      print res.format()
+      print res.format
       list.push res
     }
     sum = Tms.new; list.each{|i| sum += i}
     ets = sum.format("total: %tsec")
-    printf("%s %s\n\n", "-"*(width+CAPTION.length-ets.length-1), ets)
+    print '-'*(width+CAPTION.length-ets.length-1) + " #{ets}\n\n"
 
     # take
     print ' '*width, CAPTION
@@ -273,7 +273,7 @@ module Benchmark
       GC::start
       print label.ljust(width)
       res = Benchmark::measure(&item)
-      print res.format()
+      print res.format
       ary.push res
       list.push [label, res]
     }
