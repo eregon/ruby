@@ -127,7 +127,7 @@ module Benchmark
   BENCHMARK_VERSION = "2002-04-25" #:nodoc"
 
   def Benchmark::times() # :nodoc:
-      Process::times()
+    Process::times()
   end
 
 
@@ -176,8 +176,7 @@ module Benchmark
     print caption
     results = yield(Report.new(label_width, format))
     Array === results and results.grep(Tms).each {|t|
-      print((labels.shift || t.label || "").ljust(label_width),
-            t.format(format))
+      print((labels.shift || t.label || "").ljust(label_width), t.format(format))
     }
     STDOUT.sync = sync
   end
@@ -264,8 +263,7 @@ module Benchmark
     }
     sum = Tms.new; list.each{|i| sum += i}
     ets = sum.format("total: %tsec")
-    printf("%s %s\n\n",
-           "-"*(width+CAPTION.length-ets.length-1), ets)
+    printf("%s %s\n\n", "-"*(width+CAPTION.length-ets.length-1), ets)
 
     # take
     print ' '*width, CAPTION
