@@ -103,10 +103,10 @@
 #   using the #benchmark method:
 #
 #       require 'benchmark'
-#       include Benchmark         # we need the CAPTION and FMTSTR constants
+#       include Benchmark         # we need the CAPTION and FORMAT constants
 #
 #       n = 50000
-#       Benchmark.benchmark(" "*7 + CAPTION, 7, FMTSTR, ">total:", ">avg:") do |x|
+#       Benchmark.benchmark(" "*7 + CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
 #         tf = x.report("for:")   { for i in 1..n; a = "1"; end }
 #         tt = x.report("times:") { n.times do   ; a = "1"; end }
 #         tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
@@ -135,7 +135,7 @@ module Benchmark
   # may be used to collect and report on the results of individual
   # benchmark tests. Reserves <i>label_width</i> leading spaces for
   # labels on each line. Prints _caption_ at the top of the
-  # report, and uses _fmt_ to format each line.
+  # report, and uses _format_ to format each line.
   # If the block returns an array of
   # <tt>Benchmark::Tms</tt> objects, these will be used to format
   # additional lines of output. If _label_ parameters are
@@ -148,10 +148,10 @@ module Benchmark
   # Example:
   #
   #     require 'benchmark'
-  #     include Benchmark          # we need the CAPTION and FMTSTR constants
+  #     include Benchmark          # we need the CAPTION and FORMAT constants
   #
   #     n = 50000
-  #     Benchmark.benchmark(" "*7 + CAPTION, 7, FMTSTR, ">total:", ">avg:") do |x|
+  #     Benchmark.benchmark(" "*7 + CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
   #       tf = x.report("for:")   { for i in 1..n; a = "1"; end }
   #       tt = x.report("times:") { n.times do   ; a = "1"; end }
   #       tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
@@ -168,16 +168,16 @@ module Benchmark
   #        >avg:    1.333333   0.011111   1.344444 (  0.629761)
   #
 
-  def benchmark(caption = "", label_width = nil, fmtstr = nil, *labels) # :yield: report
+  def benchmark(caption = "", label_width = nil, format = nil, *labels) # :yield: report
     sync = STDOUT.sync
     STDOUT.sync = true
     label_width ||= 0
-    fmtstr ||= FMTSTR
+    format ||= FORMAT
     print caption
-    results = yield(Report.new(label_width, fmtstr))
+    results = yield(Report.new(label_width, format))
     Array === results and results.grep(Tms).each {|t|
       print((labels.shift || t.label || "").ljust(label_width),
-            t.format(fmtstr))
+            t.format(format))
     }
     STDOUT.sync = sync
   end
@@ -204,7 +204,7 @@ module Benchmark
   #
 
   def bm(label_width = 0, *labels, &blk) # :yield: report
-    benchmark(" "*label_width + CAPTION, label_width, FMTSTR, *labels, &blk)
+    benchmark(" "*label_width + CAPTION, label_width, FORMAT, *labels, &blk)
   end
 
 
@@ -363,22 +363,22 @@ module Benchmark
     # Returns an initialized Report instance.
     # Usually, one doesn't call this method directly, as new
     # Report objects are created by the #benchmark and #bm methods.
-    # _width_ and _fmtstr_ are the label offset and
+    # _width_ and _format_ are the label offset and
     # format string used by Tms#format.
     #
-    def initialize(width = 0, fmtstr = nil)
-      @width, @fmtstr = width, fmtstr
+    def initialize(width = 0, format = nil)
+      @width, @format = width, format
     end
 
     #
     # Prints the _label_ and measured time for the block,
-    # formatted by _fmt_. See Tms#format for the
+    # formatted by _format_. See Tms#format for the
     # formatting rules.
     #
-    def item(label = "", *fmt, &blk) # :yield:
+    def item(label = "", *format, &blk) # :yield:
       print label.ljust(@width)
       res = Benchmark::measure(&blk)
-      print res.format(@fmtstr, *fmt)
+      print res.format(@format, *format)
       res
     end
 
@@ -393,7 +393,7 @@ module Benchmark
   #
   class Tms
     CAPTION = "      user     system      total        real\n"
-    FMTSTR = "%10.6u %10.6y %10.6t %10.6r\n"
+    FORMAT = "%10.6u %10.6y %10.6t %10.6r\n"
 
     # User CPU time
     attr_reader :utime
@@ -491,19 +491,19 @@ module Benchmark
     # <tt>%r</tt>::     Replaced by the elapsed real time, as reported by Tms#real
     # <tt>%n</tt>::     Replaced by the label string, as reported by Tms#label (Mnemonic: n of "*n*ame")
     #
-    # If _fmtstr_ is not given, FMTSTR is used as default value, detailing the
+    # If _format_ is not given, FORMAT is used as default value, detailing the
     # user, system and real elapsed time.
     #
     def format(arg0 = nil, *args)
-      fmtstr = (arg0 || FMTSTR).dup
-      fmtstr.gsub!(/(%[-+\.\d]*)n/){"#{$1}s" % label}
-      fmtstr.gsub!(/(%[-+\.\d]*)u/){"#{$1}f" % utime}
-      fmtstr.gsub!(/(%[-+\.\d]*)y/){"#{$1}f" % stime}
-      fmtstr.gsub!(/(%[-+\.\d]*)U/){"#{$1}f" % cutime}
-      fmtstr.gsub!(/(%[-+\.\d]*)Y/){"#{$1}f" % cstime}
-      fmtstr.gsub!(/(%[-+\.\d]*)t/){"#{$1}f" % total}
-      fmtstr.gsub!(/(%[-+\.\d]*)r/){"(#{$1}f)" % real}
-      arg0 ? Kernel::format(fmtstr, *args) : fmtstr
+      format = (arg0 || FORMAT).dup
+      format.gsub!(/(%[-+\.\d]*)n/){"#{$1}s" % label}
+      format.gsub!(/(%[-+\.\d]*)u/){"#{$1}f" % utime}
+      format.gsub!(/(%[-+\.\d]*)y/){"#{$1}f" % stime}
+      format.gsub!(/(%[-+\.\d]*)U/){"#{$1}f" % cutime}
+      format.gsub!(/(%[-+\.\d]*)Y/){"#{$1}f" % cstime}
+      format.gsub!(/(%[-+\.\d]*)t/){"#{$1}f" % total}
+      format.gsub!(/(%[-+\.\d]*)r/){"(#{$1}f)" % real}
+      arg0 ? Kernel::format(format, *args) : format
     end
 
     #
@@ -548,7 +548,7 @@ module Benchmark
   CAPTION = Benchmark::Tms::CAPTION
 
   # The default format string used to display times.  See also Benchmark::Tms#format.
-  FMTSTR = Benchmark::Tms::FMTSTR
+  FORMAT = Benchmark::Tms::FORMAT
 end
 
 if __FILE__ == $0
@@ -556,7 +556,7 @@ if __FILE__ == $0
 
   n = ARGV[0].to_i.nonzero? || 50000
   puts %Q([#{n} times iterations of `a = "1"'])
-  benchmark("       " + CAPTION, 7, FMTSTR) do |x|
+  benchmark("       " + CAPTION, 7, FORMAT) do |x|
     x.report("for:")   {for _ in 1..n; _ = "1"; end} # Benchmark::measure
     x.report("times:") {n.times do   ; _ = "1"; end}
     x.report("upto:")  {1.upto(n) do ; _ = "1"; end}
