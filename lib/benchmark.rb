@@ -304,8 +304,7 @@ module Benchmark
   def realtime(&blk) # :yield:
     r0 = Time.now
     yield
-    r1 = Time.now
-    r1.to_f - r0.to_f
+    Time.now - r0
   end
 
 
