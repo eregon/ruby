@@ -1,0 +1,138 @@
+require 'minitest/spec'
+require 'benchmark'
+
+MiniTest::Unit.autorun
+
+describe Benchmark do
+  BENCH_FOR_TIMES_UPTO = lambda do |x|
+    n = 1000
+    tf = x.report("for:")   { for i in 1..n; a = "1"; end }
+    tt = x.report("times:") { n.times do   ; a = "1"; end }
+    tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
+    [tf+tt+tu, (tf+tt+tu)/3]
+  end
+
+  def labels
+    %w[first second third]
+  end
+
+  def bench(type = :bm, *args, &block)
+    if block
+      Benchmark.send(type, *args, &block)
+    else
+      Benchmark.send(type, *args) do |x|
+        labels.each { |label|
+          x.report(label) {}
+        }
+      end
+    end
+  end
+
+  def capture_output
+    capture_io { yield }.first.gsub(/\d\.\d{6}/, '--time--')
+  end
+
+  def capture_bench_output(type, *args, &block)
+    capture_output { bench(type, *args, &block) }
+  end
+
+  describe 'benchmark' do
+    it 'makes extra calcultations with an Array at the end of the benchmark and show the result' do
+      capture_bench_output(:benchmark,
+        ' '*7+Benchmark::CAPTION, 7,
+        Benchmark::FORMAT, ">total:", ">avg:",
+        &BENCH_FOR_TIMES_UPTO).must_equal BENCHMARK_OUTPUT_WITH_TOTAL_AVG
+    end
+  end
+
+  describe 'bm' do
+    it "returns an Array of the times with the labels" do
+      skip :not_implemented
+      capture_io do
+        results = bench
+        results.must_be_instance_of Array
+        results.zip(labels).each { |tms, label|
+          tms.must_be_instance_of Benchmark::Tms
+          tms.label.must_equal label
+        }
+      end
+    end
+
+    it 'correctly guess the label width even when not given' do
+      skip :not_implemented
+      capture_bench_output(:bm).must_equal BM_OUTPUT
+    end
+
+    it 'correctly output when the label width is given' do
+      capture_bench_output(:bm, 6).must_equal BM_OUTPUT
+    end
+
+    it 'can make extra calcultations with an array at the end of the benchmark' do
+      capture_bench_output(:bm, 7, ">total:", ">avg:",
+        &BENCH_FOR_TIMES_UPTO).must_equal BENCHMARK_OUTPUT_WITH_TOTAL_AVG
+    end
+  end
+
+  describe 'bmbm' do
+    it 'correctly guess the label width even when not given' do
+      # bug: 3 spaces instead of 2 between labels and times
+      capture_bench_output(:bmbm).must_equal BMBM_3SPACES_OUTPUT
+    end
+
+    it 'correctly output when the label width is given (bmbm ignore it, but it is a frequent mistake)' do
+      # bug: 3 spaces instead of 2 between labels and times
+      capture_bench_output(:bmbm, 7).must_equal BMBM_3SPACES_OUTPUT
+    end
+  end
+
+  describe 'Bugs' do
+    it '[ruby-dev:40906] can add in-place the time of execution of the block given' do
+      t = Benchmark::Tms.new
+      t.real.must_equal 0
+      t.add! {}
+      t.real.wont_equal 0
+    end
+  end
+end
+
+BM_OUTPUT = <<BENCH
+            user     system      total        real
+first   --time--   --time--   --time-- (  --time--)
+second  --time--   --time--   --time-- (  --time--)
+third   --time--   --time--   --time-- (  --time--)
+BENCH
+
+BMBM_OUTPUT = <<BENCH
+Rehearsal -----------------------------------------
+first   --time--   --time--   --time-- (  --time--)
+second  --time--   --time--   --time-- (  --time--)
+third   --time--   --time--   --time-- (  --time--)
+-------------------------------- total: --time--sec
+
+            user     system      total        real
+first   --time--   --time--   --time-- (  --time--)
+second  --time--   --time--   --time-- (  --time--)
+third   --time--   --time--   --time-- (  --time--)
+BENCH
+
+BMBM_3SPACES_OUTPUT = <<BENCH
+Rehearsal ------------------------------------------
+first    --time--   --time--   --time-- (  --time--)
+second   --time--   --time--   --time-- (  --time--)
+third    --time--   --time--   --time-- (  --time--)
+--------------------------------- total: --time--sec
+
+             user     system      total        real
+first    --time--   --time--   --time-- (  --time--)
+second   --time--   --time--   --time-- (  --time--)
+third    --time--   --time--   --time-- (  --time--)
+BENCH
+
+BENCHMARK_OUTPUT_WITH_TOTAL_AVG = <<BENCH
+             user     system      total        real
+for:     --time--   --time--   --time-- (  --time--)
+times:   --time--   --time--   --time-- (  --time--)
+upto:    --time--   --time--   --time-- (  --time--)
+>total:  --time--   --time--   --time-- (  --time--)
+>avg:    --time--   --time--   --time-- (  --time--)
+BENCH
