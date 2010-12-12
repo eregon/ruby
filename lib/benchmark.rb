@@ -252,34 +252,24 @@ module Benchmark
     STDOUT.sync = true
 
     # rehearsal
-    print "Rehearsal "
-    puts '-'*(width+CAPTION.length - "Rehearsal ".length)
-    list = []
-    job.list.each{|label,item|
+    puts 'Rehearsal '.ljust(width+CAPTION.length,'-')
+    ets = job.list.inject(Tms.new) { |sum,(label,item)|
       print label.ljust(width)
-      res = Benchmark::measure(&item)
+      res = Benchmark.measure(&item)
       print res.format
-      list.push res
-    }
-    sum = Tms.new; list.each{|i| sum += i}
-    ets = sum.format("total: %tsec")
-    print '-'*(width+CAPTION.length-ets.length-1) + " #{ets}\n\n"
+      sum + res
+    }.format("total: %tsec")
+    print " #{ets}\n\n".rjust(width+CAPTION.length+2,'-')
 
     # take
-    print ' '*width, CAPTION
-    list = []
-    ary = []
-    job.list.each{|label,item|
-      GC::start
+    print ' '*width + CAPTION
+    job.list.map { |label,item|
+      GC.start
       print label.ljust(width)
-      res = Benchmark::measure(&item)
-      print res.format
-      ary.push res
-      list.push [label, res]
+      Benchmark.measure(&item).tap { |res| print res.format }
+    }.tap {
+      STDOUT.sync = sync
     }
-
-    STDOUT.sync = sync
-    ary
   end
 
   #
@@ -307,7 +297,7 @@ module Benchmark
     Time.now - r0
   end
 
-
+  module_function :benchmark, :measure, :realtime, :bm, :bmbm
 
   #
   # A Job is a sequence of labelled blocks to be processed by the
@@ -334,7 +324,7 @@ module Benchmark
       label += ' '
       w = label.length
       @width = w if @width < w
-      @list.push [label, blk]
+      @list << [label, blk]
       self
     end
 
@@ -346,10 +336,6 @@ module Benchmark
     # Length of the widest label in the #list, plus one.
     attr_reader :width
   end
-
-  module_function :benchmark, :measure, :realtime, :bm, :bmbm
-
-
 
   #
   # This class is used by the Benchmark.benchmark and Benchmark.bm methods.
@@ -374,7 +360,7 @@ module Benchmark
     #
     def item(label = "", *format, &blk) # :yield:
       print label.ljust(@width)
-      res = Benchmark::measure(&blk)
+      res = Benchmark.measure(&blk)
       print res.format(@format, *format)
       res
     end
@@ -430,14 +416,14 @@ module Benchmark
     # Tms object, plus the time required to execute the code block (_blk_).
     #
     def add(&blk) # :yield:
-      self + Benchmark::measure(&blk)
+      self + Benchmark.measure(&blk)
     end
 
     #
     # An in-place version of #add.
     #
     def add!(&blk)
-      t = Benchmark::measure(&blk)
+      t = Benchmark.measure(&blk)
       @utime  = utime + t.utime
       @stime  = stime + t.stime
       @cutime = cutime + t.cutime
@@ -500,7 +486,7 @@ module Benchmark
       format.gsub!(/(%[-+\.\d]*)Y/){"#{$1}f" % cstime}
       format.gsub!(/(%[-+\.\d]*)t/){"#{$1}f" % total}
       format.gsub!(/(%[-+\.\d]*)r/){"(#{$1}f)" % real}
-      arg0 ? Kernel::format(format, *args) : format
+      arg0 ? Kernel.format(format, *args) : format
     end
 
     #
@@ -554,14 +540,14 @@ if __FILE__ == $0
   n = ARGV[0].to_i.nonzero? || 50000
   puts %Q([#{n} times iterations of `a = "1"'])
   benchmark("       " + CAPTION, 7, FORMAT) do |x|
-    x.report("for:")   {for _ in 1..n; _ = "1"; end} # Benchmark::measure
+    x.report("for:")   {for _ in 1..n; _ = "1"; end} # Benchmark.measure
     x.report("times:") {n.times do   ; _ = "1"; end}
     x.report("upto:")  {1.upto(n) do ; _ = "1"; end}
   end
 
   benchmark do
     [
-      measure{for _ in 1..n; _ = "1"; end},  # Benchmark::measure
+      measure{for _ in 1..n; _ = "1"; end},  # Benchmark.measure
       measure{n.times do   ; _ = "1"; end},
       measure{1.upto(n) do ; _ = "1"; end}
     ]
