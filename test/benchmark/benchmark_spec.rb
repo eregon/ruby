@@ -95,13 +95,11 @@ describe Benchmark do
 
   describe 'bmbm' do
     it 'correctly guess the label width even when not given' do
-      # bug: 3 spaces instead of 2 between labels and times
-      capture_bench_output(:bmbm).must_equal BMBM_3SPACES_OUTPUT
+      capture_bench_output(:bmbm).must_equal BMBM_OUTPUT
     end
 
     it 'correctly output when the label width is given (bmbm ignore it, but it is a frequent mistake)' do
-      # bug: 3 spaces instead of 2 between labels and times
-      capture_bench_output(:bmbm, 7).must_equal BMBM_3SPACES_OUTPUT
+      capture_bench_output(:bmbm, 6).must_equal BMBM_OUTPUT
     end
   end
 
@@ -140,19 +138,6 @@ third   --time--   --time--   --time-- (  --time--)
 first   --time--   --time--   --time-- (  --time--)
 second  --time--   --time--   --time-- (  --time--)
 third   --time--   --time--   --time-- (  --time--)
-BENCH
-
-BMBM_3SPACES_OUTPUT = <<BENCH
-Rehearsal ------------------------------------------
-first    --time--   --time--   --time-- (  --time--)
-second   --time--   --time--   --time-- (  --time--)
-third    --time--   --time--   --time-- (  --time--)
---------------------------------- total: --time--sec
-
-             user     system      total        real
-first    --time--   --time--   --time-- (  --time--)
-second   --time--   --time--   --time-- (  --time--)
-third    --time--   --time--   --time-- (  --time--)
 BENCH
 
 BENCHMARK_OUTPUT_WITH_TOTAL_AVG = <<BENCH

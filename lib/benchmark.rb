@@ -321,7 +321,6 @@ module Benchmark
     #
     def item(label = "", &blk) # :yield:
       raise ArgumentError, "no block" unless block_given?
-      label += ' '
       w = label.length
       @width = w if @width < w
       @list << [label, blk]
