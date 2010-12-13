@@ -63,10 +63,10 @@ describe Benchmark do
 
   describe 'bm' do
     it "returns an Array of the times with the labels" do
-      skip :not_implemented
       capture_io do
         results = bench
         results.must_be_instance_of Array
+        results.size.must_equal labels.size
         results.zip(labels).each { |tms, label|
           tms.must_be_instance_of Benchmark::Tms
           tms.label.must_equal label

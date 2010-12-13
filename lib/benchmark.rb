@@ -174,11 +174,13 @@ module Benchmark
     label_width ||= 0
     format ||= FORMAT
     print caption
-    results = yield(Report.new(label_width, format))
+    report = Report.new(label_width, format)
+    results = yield(report)
     Array === results and results.grep(Tms).each {|t|
       print((labels.shift || t.label || "").ljust(label_width), t.format(format))
     }
     STDOUT.sync = sync
+    report.list
   end
 
 
@@ -349,7 +351,7 @@ module Benchmark
     # format string used by Tms#format.
     #
     def initialize(width = 0, format = nil)
-      @width, @format = width, format
+      @width, @format, @list = width, format, []
     end
 
     #
@@ -359,12 +361,14 @@ module Benchmark
     #
     def item(label = "", *format, &blk) # :yield:
       print label.ljust(@width)
-      res = Benchmark.measure(&blk)
+      @list << res = Benchmark.measure(label, &blk)
       print res.format(@format, *format)
       res
     end
 
     alias report item
+
+    attr_reader :list
   end
 
 
