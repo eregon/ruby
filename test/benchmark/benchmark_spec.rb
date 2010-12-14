@@ -103,6 +103,15 @@ describe Benchmark do
     end
   end
 
+  describe 'Report' do
+    describe '#item' do
+      it 'shows the title, even if not a string' do
+        capture_bench_output(:bm) { |x| x.report(:title) {} }.must_include 'title'
+        capture_bench_output(:bmbm) { |x| x.report(:title) {} }.must_include 'title'
+      end
+    end
+  end
+
   describe 'Bugs' do
     it '[ruby-dev:40906] can add in-place the time of execution of the block given' do
       t = Benchmark::Tms.new

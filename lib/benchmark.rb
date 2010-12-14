@@ -323,6 +323,7 @@ module Benchmark
     #
     def item(label = "", &blk) # :yield:
       raise ArgumentError, "no block" unless block_given?
+      label = label.to_s
       w = label.length
       @width = w if @width < w
       @list << [label, blk]
@@ -360,7 +361,7 @@ module Benchmark
     # formatting rules.
     #
     def item(label = "", *format, &blk) # :yield:
-      print label.ljust(@width)
+      print label.to_s.ljust(@width)
       @list << res = Benchmark.measure(label, &blk)
       print res.format(@format, *format)
       res
@@ -410,7 +411,7 @@ module Benchmark
     # as the label.
     #
     def initialize(u = 0.0, s = 0.0, cu = 0.0, cs = 0.0, real = 0.0, l = nil)
-      @utime, @stime, @cutime, @cstime, @real, @label = u, s, cu, cs, real, l
+      @utime, @stime, @cutime, @cstime, @real, @label = u, s, cu, cs, real, l.to_s
       @total = @utime + @stime + @cutime + @cstime
     end
 
