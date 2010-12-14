@@ -126,11 +126,6 @@ module Benchmark
 
   BENCHMARK_VERSION = "2002-04-25" #:nodoc"
 
-  def Benchmark.times # :nodoc:
-    Process.times
-  end
-
-
   # Invokes the block with a <tt>Benchmark::Report</tt> object, which
   # may be used to collect and report on the results of individual
   # benchmark tests. Reserves <i>label_width</i> leading spaces for
@@ -279,9 +274,9 @@ module Benchmark
   # Benchmark::Tms object.
   #
   def measure(label = "") # :yield:
-    t0, r0 = Benchmark.times, Time.now
+    t0, r0 = Process.times, Time.now
     yield
-    t1, r1 = Benchmark.times, Time.now
+    t1, r1 = Process.times, Time.now
     Benchmark::Tms.new(t1.utime  - t0.utime,
                        t1.stime  - t0.stime,
                        t1.cutime - t0.cutime,
