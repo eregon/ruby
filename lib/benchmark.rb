@@ -405,13 +405,12 @@ module Benchmark
 
     #
     # Returns an initialized Tms object which has
-    # _u_ as the user CPU time, _s_ as the system CPU time,
-    # _cu_ as the children's user CPU time, _cs_ as the children's
-    # system CPU time, _real_ as the elapsed real time and _l_
-    # as the label.
+    # _utime_ as the user CPU time, _stime_ as the system CPU time,
+    # _cutime_ as the children's user CPU time, _cstime_ as the children's
+    # system CPU time, _real_ as the elapsed real time and _label_ as the label.
     #
-    def initialize(u = 0.0, s = 0.0, cu = 0.0, cs = 0.0, real = 0.0, l = nil)
-      @utime, @stime, @cutime, @cstime, @real, @label = u, s, cu, cs, real, l.to_s
+    def initialize(utime = 0.0, stime = 0.0, cutime = 0.0, cstime = 0.0, real = 0.0, label = nil)
+      @utime, @stime, @cutime, @cstime, @real, @label = utime, stime, cutime, cstime, real, label.to_s
       @total = @utime + @stime + @cutime + @cstime
     end
 
