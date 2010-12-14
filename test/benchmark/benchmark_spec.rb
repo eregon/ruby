@@ -55,7 +55,7 @@ describe Benchmark do
   describe 'benchmark' do
     it 'makes extra calcultations with an Array at the end of the benchmark and show the result' do
       capture_bench_output(:benchmark,
-        ' '*7+Benchmark::CAPTION, 7,
+        Benchmark::CAPTION, 7,
         Benchmark::FORMAT, ">total:", ">avg:",
         &BENCH_FOR_TIMES_UPTO).must_equal BENCHMARK_OUTPUT_WITH_TOTAL_AVG
     end

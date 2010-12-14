@@ -106,7 +106,7 @@
 #       include Benchmark         # we need the CAPTION and FORMAT constants
 #
 #       n = 50000
-#       Benchmark.benchmark(" "*7 + CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
+#       Benchmark.benchmark(CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
 #         tf = x.report("for:")   { for i in 1..n; a = "1"; end }
 #         tt = x.report("times:") { n.times do   ; a = "1"; end }
 #         tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
@@ -151,7 +151,7 @@ module Benchmark
   #     include Benchmark          # we need the CAPTION and FORMAT constants
   #
   #     n = 50000
-  #     Benchmark.benchmark(" "*7 + CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
+  #     Benchmark.benchmark(CAPTION, 7, FORMAT, ">total:", ">avg:") do |x|
   #       tf = x.report("for:")   { for i in 1..n; a = "1"; end }
   #       tt = x.report("times:") { n.times do   ; a = "1"; end }
   #       tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
@@ -173,7 +173,7 @@ module Benchmark
     STDOUT.sync = true
     label_width ||= 0
     format ||= FORMAT
-    print caption
+    print ' '*label_width + caption
     report = Report.new(label_width, format)
     results = yield(report)
     Array === results and results.grep(Tms).each {|t|
@@ -205,7 +205,7 @@ module Benchmark
   #
 
   def bm(label_width = 0, *labels, &blk) # :yield: report
-    benchmark(" "*label_width + CAPTION, label_width, FORMAT, *labels, &blk)
+    benchmark(CAPTION, label_width, FORMAT, *labels, &blk)
   end
 
 
