@@ -475,16 +475,16 @@ module Benchmark
     # If _format_ is not given, FORMAT is used as default value, detailing the
     # user, system and real elapsed time.
     #
-    def format(arg0 = nil, *args)
-      format = (arg0 || FORMAT).dup
-      format.gsub!(/(%[-+\.\d]*)n/){"#{$1}s" % label}
-      format.gsub!(/(%[-+\.\d]*)u/){"#{$1}f" % utime}
-      format.gsub!(/(%[-+\.\d]*)y/){"#{$1}f" % stime}
-      format.gsub!(/(%[-+\.\d]*)U/){"#{$1}f" % cutime}
-      format.gsub!(/(%[-+\.\d]*)Y/){"#{$1}f" % cstime}
-      format.gsub!(/(%[-+\.\d]*)t/){"#{$1}f" % total}
-      format.gsub!(/(%[-+\.\d]*)r/){"(#{$1}f)" % real}
-      arg0 ? Kernel.format(format, *args) : format
+    def format(format = nil, *args)
+      str = (format || FORMAT).dup
+      str.gsub!(/(%[-+\.\d]*)n/) { "#{$1}s" % label }
+      str.gsub!(/(%[-+\.\d]*)u/) { "#{$1}f" % utime }
+      str.gsub!(/(%[-+\.\d]*)y/) { "#{$1}f" % stime }
+      str.gsub!(/(%[-+\.\d]*)U/) { "#{$1}f" % cutime }
+      str.gsub!(/(%[-+\.\d]*)Y/) { "#{$1}f" % cstime }
+      str.gsub!(/(%[-+\.\d]*)t/) { "#{$1}f" % total }
+      str.gsub!(/(%[-+\.\d]*)r/) { "(#{$1}f)" % real }
+      format ? str % args : str
     end
 
     #
