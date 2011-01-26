@@ -131,6 +131,8 @@ module Benchmark
   # benchmark tests. Reserves <i>label_width</i> leading spaces for
   # labels on each line. Prints _caption_ at the top of the
   # report, and uses _format_ to format each line.
+  # Returns an array of Benchmark::Tms objects.
+  #
   # If the block returns an array of
   # <tt>Benchmark::Tms</tt> objects, these will be used to format
   # additional lines of output. If _label_ parameters are
@@ -364,6 +366,7 @@ module Benchmark
 
     alias report item
 
+    # An array of Benchmark::Tms objects representing each item.
     attr_reader :list
   end
 
