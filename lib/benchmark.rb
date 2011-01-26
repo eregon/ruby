@@ -332,7 +332,7 @@ module Benchmark
     # An array of 2-element arrays, consisting of label and block pairs.
     attr_reader :list
 
-    # Length of the widest label in the #list, plus one.
+    # Length of the widest label in the #list.
     attr_reader :width
   end
 
