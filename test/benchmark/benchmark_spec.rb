@@ -6,17 +6,17 @@ MiniTest::Unit.autorun
 describe Benchmark do
   BENCH_FOR_TIMES_UPTO = lambda do |x|
     n = 1000
-    tf = x.report("for:")   { for i in 1..n; a = "1"; end }
-    tt = x.report("times:") { n.times do   ; a = "1"; end }
-    tu = x.report("upto:")  { 1.upto(n) do ; a = "1"; end }
+    tf = x.report("for:")   { for _ in 1..n; '1'; end }
+    tt = x.report("times:") { n.times do   ; '1'; end }
+    tu = x.report("upto:")  { 1.upto(n) do ; '1'; end }
     [tf+tt+tu, (tf+tt+tu)/3]
   end
 
   BENCH_FOR_TIMES_UPTO_NO_LABEL = lambda do |x|
     n = 1000
-    x.report { for i in 1..n; a = "1"; end }
-    x.report { n.times do   ; a = "1"; end }
-    x.report { 1.upto(n) do ; a = "1"; end }
+    x.report { for _ in 1..n; '1'; end }
+    x.report { n.times do   ; '1'; end }
+    x.report { 1.upto(n) do ; '1'; end }
   end
 
   def labels
