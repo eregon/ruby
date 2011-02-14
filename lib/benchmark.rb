@@ -263,7 +263,7 @@ module Benchmark
     job.list.map { |label,item|
       GC.start
       print label.ljust(width)
-      Benchmark.measure(label, &item).tap { |res| print res.format }
+      Benchmark.measure(label, &item).tap { |res| print res }
     }
   ensure
     STDOUT.sync = sync unless sync.nil?
