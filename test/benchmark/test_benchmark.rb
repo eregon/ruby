@@ -129,37 +129,37 @@ describe Benchmark do
 end
 
 BM_OUTPUT = <<BENCH
-            user     system      total        real
-first   --time--   --time--   --time-- (  --time--)
-second  --time--   --time--   --time-- (  --time--)
-third   --time--   --time--   --time-- (  --time--)
+             user     system      total        real
+first    --time--   --time--   --time-- (  --time--)
+second   --time--   --time--   --time-- (  --time--)
+third    --time--   --time--   --time-- (  --time--)
 BENCH
 
 BM_OUTPUT_NO_LABEL = <<BENCH
-      user     system      total        real
-  --time--   --time--   --time-- (  --time--)
-  --time--   --time--   --time-- (  --time--)
-  --time--   --time--   --time-- (  --time--)
+       user     system      total        real
+   --time--   --time--   --time-- (  --time--)
+   --time--   --time--   --time-- (  --time--)
+   --time--   --time--   --time-- (  --time--)
 BENCH
 
 BMBM_OUTPUT = <<BENCH
-Rehearsal -----------------------------------------
-first   --time--   --time--   --time-- (  --time--)
-second  --time--   --time--   --time-- (  --time--)
-third   --time--   --time--   --time-- (  --time--)
--------------------------------- total: --time--sec
+Rehearsal ------------------------------------------
+first    --time--   --time--   --time-- (  --time--)
+second   --time--   --time--   --time-- (  --time--)
+third    --time--   --time--   --time-- (  --time--)
+--------------------------------- total: --time--sec
 
-            user     system      total        real
-first   --time--   --time--   --time-- (  --time--)
-second  --time--   --time--   --time-- (  --time--)
-third   --time--   --time--   --time-- (  --time--)
+             user     system      total        real
+first    --time--   --time--   --time-- (  --time--)
+second   --time--   --time--   --time-- (  --time--)
+third    --time--   --time--   --time-- (  --time--)
 BENCH
 
 BENCHMARK_OUTPUT_WITH_TOTAL_AVG = <<BENCH
-             user     system      total        real
-for:     --time--   --time--   --time-- (  --time--)
-times:   --time--   --time--   --time-- (  --time--)
-upto:    --time--   --time--   --time-- (  --time--)
->total:  --time--   --time--   --time-- (  --time--)
->avg:    --time--   --time--   --time-- (  --time--)
+              user     system      total        real
+for:      --time--   --time--   --time-- (  --time--)
+times:    --time--   --time--   --time-- (  --time--)
+upto:     --time--   --time--   --time-- (  --time--)
+>total:   --time--   --time--   --time-- (  --time--)
+>avg:     --time--   --time--   --time-- (  --time--)
 BENCH

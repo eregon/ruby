@@ -167,6 +167,7 @@ module Benchmark
     sync = STDOUT.sync
     STDOUT.sync = true
     label_width ||= 0
+    label_width += 1
     format ||= FORMAT
     print ' '*label_width + caption
     report = Report.new(label_width, format)
@@ -244,7 +245,7 @@ module Benchmark
   def bmbm(width = 0, &blk) # :yield: job
     job = Job.new(width)
     yield(job)
-    width = job.width
+    width = job.width + 1
     sync = STDOUT.sync
     STDOUT.sync = true
 
