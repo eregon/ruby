@@ -19,16 +19,14 @@ describe Benchmark do
     x.report { 1.upto(n) do ; '1'; end }
   end
 
-  def labels
-    %w[first second third]
-  end
+  LABELS = %w[first second third]
 
   def bench(type = :bm, *args, &block)
     if block
       Benchmark.send(type, *args, &block)
     else
       Benchmark.send(type, *args) do |x|
-        labels.each { |label|
+        LABELS.each { |label|
           x.report(label) {}
         }
       end
@@ -76,8 +74,8 @@ describe Benchmark do
         capture_io do
           results = bench(meth)
           results.must_be_instance_of Array
-          results.size.must_equal labels.size
-          results.zip(labels).each { |tms, label|
+          results.size.must_equal LABELS.size
+          results.zip(LABELS).each { |tms, label|
             tms.must_be_instance_of Benchmark::Tms
             tms.label.must_equal label
           }
