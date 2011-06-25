@@ -50,6 +50,8 @@ describe Benchmark do
       Benchmark::Tms.new(1,2,3,4,5,'label').format('%u %y %U %Y %t %r %n').must_equal \
         "1.000000 2.000000 3.000000 4.000000 10.000000 (5.000000) label"
       Benchmark::Tms.new(1).format('%u %.3f', 2).must_equal "1.000000 2.000"
+      Benchmark::Tms.new(100, 150, 0, 0, 200).to_s.must_equal \
+        "100.000000 150.000000 250.000000 (200.000000)\n"
     end
 
     it 'wont modify the format String given' do
