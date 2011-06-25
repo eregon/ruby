@@ -85,11 +85,6 @@ describe Benchmark do
       end
     end
 
-    it 'correctly guess the label width even when not given' do
-      skip :not_implemented
-      capture_bench_output(:bm).must_equal BM_OUTPUT
-    end
-
     it 'correctly output when the label width is given' do
       capture_bench_output(:bm, 6).must_equal BM_OUTPUT
     end
