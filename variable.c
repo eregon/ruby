@@ -17,9 +17,7 @@
 #include "ruby/encoding.h"
 #include "node.h"
 #include "constant.h"
-
-void rb_vm_change_state(void);
-void rb_vm_inc_const_missing_count(void);
+#include "internal.h"
 
 st_table *rb_global_tbl;
 st_table *rb_class_tbl;
@@ -312,7 +310,8 @@ rb_class_name(VALUE klass)
 const char *
 rb_class2name(VALUE klass)
 {
-    return RSTRING_PTR(rb_class_name(klass));
+    VALUE name = rb_class_name(klass);
+    return RSTRING_PTR(name);
 }
 
 const char *
@@ -1368,27 +1367,35 @@ const_missing(VALUE klass, ID id)
  * call-seq:
  *    mod.const_missing(sym)    -> obj
  *
- *  Invoked when a reference is made to an undefined constant in
- *  <i>mod</i>. It is passed a symbol for the undefined constant, and
- *  returns a value to be used for that constant. The
- *  following code is a (very bad) example: if reference is made to
- *  an undefined constant, it attempts to load a file whose name is
- *  the lowercase version of the constant (thus class <code>Fred</code> is
- *  assumed to be in file <code>fred.rb</code>). If found, it returns the
- *  value of the loaded class. It therefore implements a perverse
- *  kind of autoload facility.
+ * Invoked when a reference is made to an undefined constant in
+ * <i>mod</i>. It is passed a symbol for the undefined constant, and
+ * returns a value to be used for that constant. The
+ * following code is an example of the same:
  *
- *    def Object.const_missing(name)
- *      @looked_for ||= {}
- *      str_name = name.to_s
- *      raise "Class not found: #{name}" if @looked_for[str_name]
- *      @looked_for[str_name] = 1
- *      file = str_name.downcase
- *      require file
- *      klass = const_get(name)
- *      return klass if klass
- *      raise "Class not found: #{name}"
- *    end
+ *   def Foo.const_missing(name)
+ *     name # return the constant name as Symbol
+ *   end
+ *
+ *   Foo::UNDEFINED_CONST    #=> :UNDEFINED_CONST: symbol returned
+ *
+ * In the next example when a reference is made to an undefined constant,
+ * it attempts to load a file whose name is the lowercase version of the
+ * constant (thus class <code>Fred</code> is assumed to be in file
+ * <code>fred.rb</code>).  If found, it returns the loaded class. It
+ * therefore implements an autoload feature similar to Kernel#autoload and
+ * Module#autoload.
+ *
+ *   def Object.const_missing(name)
+ *     @looked_for ||= {}
+ *     str_name = name.to_s
+ *     raise "Class not found: #{name}" if @looked_for[str_name]
+ *     @looked_for[str_name] = 1
+ *     file = str_name.downcase
+ *     require file
+ *     klass = const_get(name)
+ *     return klass if klass
+ *     raise "Class not found: #{name}"
+ *   end
  *
  */
 
@@ -1568,14 +1575,17 @@ rb_autoload_p(VALUE mod, ID id)
     NODE *load;
     const char *loading = 0;
 
-    if (!autoload_node_id(mod, id)) return Qnil;
+    while (!autoload_node_id(mod, id)) {
+	mod = RCLASS_SUPER(mod);
+	if (!mod) return Qnil;
+    }
     load = autoload_node(mod, id, &loading);
     if (!load) return Qnil;
     return load && (file = load->nd_lit) ? file : Qnil;
 }
 
 static VALUE
-rb_const_get_0(VALUE klass, ID id, int exclude, int recurse)
+rb_const_get_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 {
     VALUE value, tmp;
     int mod_retry = 0;
@@ -1587,7 +1597,7 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse)
 	st_data_t data;
 	while (RCLASS_CONST_TBL(tmp) && st_lookup(RCLASS_CONST_TBL(tmp), (st_data_t)id, &data)) {
 	    rb_const_entry_t *ce = (rb_const_entry_t *)data;
-	    if (ce->flag == CONST_PRIVATE) {
+	    if (visibility && ce->flag == CONST_PRIVATE) {
 		rb_name_error(id, "private constant %s::%s referenced", rb_class2name(klass), rb_id2name(id));
 	    }
 	    value = ce->value;
@@ -1620,19 +1630,37 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse)
 VALUE
 rb_const_get_from(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, TRUE, TRUE);
+    return rb_const_get_0(klass, id, TRUE, TRUE, FALSE);
 }
 
 VALUE
 rb_const_get(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, FALSE, TRUE);
+    return rb_const_get_0(klass, id, FALSE, TRUE, FALSE);
 }
 
 VALUE
 rb_const_get_at(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, TRUE, FALSE);
+    return rb_const_get_0(klass, id, TRUE, FALSE, FALSE);
+}
+
+VALUE
+rb_public_const_get_from(VALUE klass, ID id)
+{
+    return rb_const_get_0(klass, id, TRUE, TRUE, TRUE);
+}
+
+VALUE
+rb_public_const_get(VALUE klass, ID id)
+{
+    return rb_const_get_0(klass, id, FALSE, TRUE, TRUE);
+}
+
+VALUE
+rb_public_const_get_at(VALUE klass, ID id)
+{
+    return rb_const_get_0(klass, id, TRUE, FALSE, TRUE);
 }
 
 /*
@@ -1691,7 +1719,7 @@ sv_i(ID key, rb_const_entry_t *ce, st_table *tbl)
 {
     if (rb_is_const_id(key)) {
 	if (!st_lookup(tbl, (st_data_t)key, 0)) {
-	    st_insert(tbl, (st_data_t)key, (st_data_t)key);
+	    st_insert(tbl, (st_data_t)key, (st_data_t)ce);
 	}
     }
     return ST_CONTINUE;
@@ -1724,9 +1752,11 @@ rb_mod_const_of(VALUE mod, void *data)
 }
 
 static int
-list_i(ID key, ID value, VALUE ary)
+list_i(st_data_t key, st_data_t value, VALUE ary)
 {
-    rb_ary_push(ary, ID2SYM(key));
+    ID sym = (ID)key;
+    rb_const_entry_t *ce = (rb_const_entry_t *)value;
+    if (ce->flag != CONST_PRIVATE) rb_ary_push(ary, ID2SYM(sym));
     return ST_CONTINUE;
 }
 
@@ -1781,7 +1811,7 @@ rb_mod_constants(int argc, VALUE *argv, VALUE mod)
 }
 
 static int
-rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
+rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 {
     st_data_t value;
     VALUE tmp;
@@ -1791,7 +1821,11 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
   retry:
     while (tmp) {
 	if (RCLASS_CONST_TBL(tmp) && st_lookup(RCLASS_CONST_TBL(tmp), (st_data_t)id, &value)) {
-	    if (((rb_const_entry_t*)value)->value == Qundef && !autoload_node((VALUE)klass, id, 0))
+	    rb_const_entry_t *ce = (rb_const_entry_t *)value;
+	    if (visibility && ce->flag == CONST_PRIVATE) {
+		return (int)Qfalse;
+	    }
+	    if (ce->value == Qundef && !autoload_node(tmp, id, 0))
 		return (int)Qfalse;
 	    return (int)Qtrue;
 	}
@@ -1809,19 +1843,37 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
 int
 rb_const_defined_from(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, TRUE, TRUE);
+    return rb_const_defined_0(klass, id, TRUE, TRUE, FALSE);
 }
 
 int
 rb_const_defined(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, FALSE, TRUE);
+    return rb_const_defined_0(klass, id, FALSE, TRUE, FALSE);
 }
 
 int
 rb_const_defined_at(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, TRUE, FALSE);
+    return rb_const_defined_0(klass, id, TRUE, FALSE, FALSE);
+}
+
+int
+rb_public_const_defined_from(VALUE klass, ID id)
+{
+    return rb_const_defined_0(klass, id, TRUE, TRUE, TRUE);
+}
+
+int
+rb_public_const_defined(VALUE klass, ID id)
+{
+    return rb_const_defined_0(klass, id, FALSE, TRUE, TRUE);
+}
+
+int
+rb_public_const_defined_at(VALUE klass, ID id)
+{
+    return rb_const_defined_0(klass, id, TRUE, FALSE, TRUE);
 }
 
 void
@@ -1836,6 +1888,7 @@ void
 rb_const_set(VALUE klass, ID id, VALUE val)
 {
     rb_const_entry_t *ce;
+    VALUE visibility = CONST_PUBLIC;
 
     if (NIL_P(klass)) {
 	rb_raise(rb_eTypeError, "no class/module to define constant %s",
@@ -1850,17 +1903,20 @@ rb_const_set(VALUE klass, ID id, VALUE val)
 	st_data_t value;
 
 	if (st_lookup(RCLASS_CONST_TBL(klass), (st_data_t)id, &value)) {
-	    if (((rb_const_entry_t*)value)->value == Qundef)
+	    rb_const_entry_t *ce = (rb_const_entry_t*)value;
+	    if (ce->value == Qundef)
 		autoload_delete(klass, id);
-	    else
+	    else {
+		visibility = ce->flag;
 		rb_warn("already initialized constant %s", rb_id2name(id));
+	    }
 	}
     }
 
     rb_vm_change_state();
 
     ce = ALLOC(rb_const_entry_t);
-    ce->flag = CONST_PUBLIC;
+    ce->flag = (rb_const_flag_t)visibility;
     ce->value = val;
 
     st_insert(RCLASS_CONST_TBL(klass), (st_data_t)id, (st_data_t)ce);
@@ -1895,7 +1951,7 @@ set_const_visibility(VALUE mod, int argc, VALUE *argv, rb_const_flag_t flag)
 
     if (rb_safe_level() >= 4 && !OBJ_UNTRUSTED(mod)) {
 	rb_raise(rb_eSecurityError,
-		 "Insecure: can't change method visibility");
+		 "Insecure: can't change constant visibility");
     }
 
     for (i = 0; i < argc; i++) {

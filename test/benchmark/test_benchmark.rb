@@ -36,7 +36,7 @@ describe Benchmark do
   end
 
   def capture_output
-    capture_io { yield }.first.gsub(/\d\.\d{6}/, '--time--')
+    capture_io { yield }.first.gsub(/[ \-]\d\.\d{6}/, ' --time--')
   end
 
   def capture_bench_output(type, *args, &block)
@@ -123,7 +123,7 @@ describe Benchmark do
     it '[ruby-dev:40906] can add in-place the time of execution of the block given' do
       t = Benchmark::Tms.new
       t.real.must_equal 0
-      t.add! {}
+      t.add! { sleep 0.1 }
       t.real.wont_equal 0
     end
   end

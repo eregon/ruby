@@ -165,7 +165,7 @@ module REXML
     #   Document.new("<a><b/></a>").serialize( tr )
     #
     # output::
-    #	  output an object which supports '<< string'; this is where the
+    #     output an object which supports '<< string'; this is where the
     #   document will be written.
     # indent::
     #   An integer.  If -1, no indenting will be used; otherwise, the
@@ -184,7 +184,7 @@ module REXML
     #   that IE's limited abilities can handle.  This hack inserts a space
     #   before the /> on empty tags.  Defaults to false
     def write( output=$stdout, indent=-1, transitive=false, ie_hack=false )
-      if xml_decl.encoding != ::Encoding::UTF_8 && !output.kind_of?(Output)
+      if xml_decl.encoding != 'UTF-8' && !output.kind_of?(Output)
         output = Output.new( output, xml_decl.encoding )
       end
       formatter = if indent > -1

@@ -56,7 +56,7 @@
 #endif
 
 #define digit(x) ((x) >= '0' && (x) <= '9')
-#define strstart(s, n) (strncasecmp(s, n, strlen(n)) == 0)
+#define strstart(s, n) (strncasecmp((s), (n), strlen(n)) == 0)
 
 static char buf[16];
 
@@ -65,7 +65,7 @@ nl_langinfo_codeset(void)
 {
   const char *l, *p;
   int n;
-  
+
   if (((l = getenv("LC_ALL"))   && *l) ||
       ((l = getenv("LC_CTYPE")) && *l) ||
       ((l = getenv("LANG"))     && *l)) {

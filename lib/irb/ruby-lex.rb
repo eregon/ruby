@@ -1046,7 +1046,7 @@ class RubyLex
       while ch = getc
 	if @quoted == ch and nest == 0
 	  break
-	elsif ch == "#" and peek(0) == "{"
+	elsif @ltype != "'" && ch == "#" && peek(0) == "{"
 	  identify_string_dvar
 	elsif @ltype != "'" && @ltype != "]" && @ltype != ":" and ch == "#"
 	  subtype = true
@@ -1100,7 +1100,7 @@ class RubyLex
       @indent = 0
       @indent_stack = []
       @lex_state = EXPR_BEG
-      
+
       loop do
 	@continue = false
 	prompt
@@ -1119,7 +1119,7 @@ class RubyLex
       @quoted = reserve_quoted
     end
   end
-  
+
   def identify_comment
     @ltype = "#"
 

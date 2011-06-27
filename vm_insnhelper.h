@@ -154,6 +154,9 @@ extern VALUE ruby_vm_const_missing_count;
   (c1)->nd_clss = __tmp_c2->nd_clss; \
   (c1)->nd_visi = __tmp_c2->nd_visi;\
   (c1)->nd_next = __tmp_c2->nd_next; \
+  if (__tmp_c2->flags & NODE_FL_CREF_PUSHED_BY_EVAL) { \
+      (c1)->flags |= NODE_FL_CREF_PUSHED_BY_EVAL; \
+  } \
 } while (0)
 
 #define CALL_METHOD(num, blockptr, flag, id, me, recv) do { \
@@ -204,5 +207,14 @@ extern VALUE ruby_vm_const_missing_count;
 } while (0)
 
 #endif
+
+static VALUE ruby_vm_global_state_version = 1;
+
+#define GET_VM_STATE_VERSION() (ruby_vm_global_state_version)
+#define INC_VM_STATE_VERSION() do { \
+    ruby_vm_global_state_version = (ruby_vm_global_state_version + 1); \
+    if (ruby_vm_global_state_version == 0) vm_clear_all_cache(); \
+} while (0)
+static void vm_clear_all_cache(void);
 
 #endif /* RUBY_INSNHELPER_H */

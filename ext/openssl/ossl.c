@@ -170,7 +170,7 @@ ossl_pem_passwd_cb(char *buf, int max_len, int flag, void *pwd)
 	rflag = flag ? Qtrue : Qfalse;
 	pass  = rb_protect(ossl_pem_passwd_cb0, rflag, &status);
 	if (status) return -1; /* exception was raised. */
-	len = RSTRING_LEN(pass);
+	len = RSTRING_LENINT(pass);
 	if (len < 4) { /* 4 is OpenSSL hardcoded limit */
 	    rb_warning("password must be longer than 4 bytes");
 	    continue;
@@ -302,7 +302,7 @@ ossl_make_error(VALUE exc, const char *fmt, va_list args)
     }
     ERR_clear_error();
 
-    if(len > BUFSIZ) len = strlen(buf);
+    if(len > BUFSIZ) len = rb_long2int(strlen(buf));
     return rb_exc_new(exc, buf, len);
 }
 
@@ -758,7 +758,7 @@ ossl_debug_set(VALUE self, VALUE val)
  * === Peer Verification
  *
  * An unverified SSL connection does not provide much security.  For enhanced
- * security the client or server can verify the certificate the of its peer.
+ * security the client or server can verify the certificate of its peer.
  *
  * The client can be modified to verify the server's certificate against the
  * certificate authority's certificate:
@@ -819,10 +819,18 @@ Init_openssl()
     mOSSL = rb_define_module("OpenSSL");
 
     /*
-     * Constants
+     * OpenSSL ruby extension version
      */
     rb_define_const(mOSSL, "VERSION", rb_str_new2(OSSL_VERSION));
+
+    /*
+     * Version of OpenSSL the ruby OpenSSL extension was built with
+     */
     rb_define_const(mOSSL, "OPENSSL_VERSION", rb_str_new2(OPENSSL_VERSION_TEXT));
+    /*
+     * Version number of OpenSSL the ruby OpenSSL extension was built with
+     * (base 16)
+     */
     rb_define_const(mOSSL, "OPENSSL_VERSION_NUMBER", INT2NUM(OPENSSL_VERSION_NUMBER));
 
     /*

@@ -12,6 +12,7 @@
 #include "insns.inc"
 #include <math.h>
 #include "constant.h"
+#include "internal.h"
 
 /* control stack frame */
 
@@ -385,11 +386,11 @@ call_cfunc(VALUE (*func)(), VALUE recv,
 }
 
 static inline VALUE
-vm_call_cfunc(rb_thread_t *th, rb_control_frame_t *reg_cfp,
+vm_call_cfunc(rb_thread_t *th, volatile rb_control_frame_t *reg_cfp,
 	      int num, VALUE recv, const rb_block_t *blockptr,
 	      const rb_method_entry_t *me)
 {
-    VALUE val = 0;
+    volatile VALUE val = 0;
     const rb_method_definition_t *def = me->def;
     rb_control_frame_t *cfp;
 
@@ -1135,13 +1136,15 @@ vm_get_const_base(const rb_iseq_t *iseq, const VALUE *lfp, const VALUE *dfp)
 static inline void
 vm_check_if_namespace(VALUE klass)
 {
+    VALUE str;
     switch (TYPE(klass)) {
       case T_CLASS:
       case T_MODULE:
 	break;
       default:
+	str = rb_inspect(klass);
 	rb_raise(rb_eTypeError, "%s is not a class/module",
-		 RSTRING_PTR(rb_inspect(klass)));
+		 StringValuePtr(str));
     }
 }
 
@@ -1153,15 +1156,20 @@ vm_get_ev_const(rb_thread_t *th, const rb_iseq_t *iseq,
 
     if (orig_klass == Qnil) {
 	/* in current lexical scope */
-	const NODE *cref = vm_get_cref(iseq, th->cfp->lfp, th->cfp->dfp);
-	const NODE *root_cref = NULL;
+	const NODE *root_cref = vm_get_cref(iseq, th->cfp->lfp, th->cfp->dfp);
+	const NODE *cref;
 	VALUE klass = orig_klass;
 
+	while (root_cref && root_cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL) {
+	    root_cref = root_cref->nd_next;
+	}
+	cref = root_cref;
 	while (cref && cref->nd_next) {
-	    if (!(cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL)) {
+	    if (cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL) {
+		klass = Qnil;
+	    }
+	    else {
 		klass = cref->nd_clss;
-		if (root_cref == NULL)
-		    root_cref = cref;
 	    }
 	    cref = cref->nd_next;
 
@@ -1175,6 +1183,7 @@ vm_get_ev_const(rb_thread_t *th, const rb_iseq_t *iseq,
 		    if (val == Qundef) {
 			if (am == klass) break;
 			am = klass;
+			if (is_defined) return 1;
 			rb_autoload_load(klass, id);
 			goto search_continue;
 		    }
@@ -1208,10 +1217,10 @@ vm_get_ev_const(rb_thread_t *th, const rb_iseq_t *iseq,
     else {
 	vm_check_if_namespace(orig_klass);
 	if (is_defined) {
-	    return rb_const_defined_from(orig_klass, id);
+	    return rb_public_const_defined_from(orig_klass, id);
 	}
 	else {
-	    return rb_const_get_from(orig_klass, id);
+	    return rb_public_const_get_from(orig_klass, id);
 	}
     }
 }
@@ -1336,8 +1345,8 @@ vm_method_search(VALUE id, VALUE klass, IC ic)
 {
     rb_method_entry_t *me;
 #if OPT_INLINE_METHOD_CACHE
-    if (LIKELY(klass == ic->ic_class) &&
-	LIKELY(GET_VM_STATE_VERSION() == ic->ic_vmstat)) {
+    if (LIKELY(klass == ic->ic_class &&
+	GET_VM_STATE_VERSION() == ic->ic_vmstat)) {
 	me = ic->ic_value.method;
     }
     else {
@@ -1401,9 +1410,14 @@ vm_search_superclass(rb_control_frame_t *reg_cfp, rb_iseq_t *iseq,
 	}
 
 	while (lcfp->iseq != iseq) {
+	    rb_thread_t *th = GET_THREAD();
 	    VALUE *tdfp = GET_PREV_DFP(lcfp->dfp);
 	    while (1) {
 		lcfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(lcfp);
+		if (RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, lcfp)) {
+		    rb_raise(rb_eNoMethodError,
+			     "super called outside of method");
+		}
 		if (lcfp->dfp == tdfp) {
 		    break;
 		}
@@ -1690,7 +1704,6 @@ opt_eq_func(VALUE recv, VALUE obj, IC ic)
 
     {
 	const rb_method_entry_t *me = vm_method_search(idEq, CLASS_OF(recv), ic);
-	extern VALUE rb_obj_equal(VALUE obj1, VALUE obj2);
 
 	if (check_cfunc(me, rb_obj_equal)) {
 	    return recv == obj ? Qtrue : Qfalse;

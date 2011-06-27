@@ -34,10 +34,10 @@ class RDoc::Markup::ToHtmlCrossref < RDoc::Markup::ToHtml
                       # A::B::C.meth
                       #{CLASS_REGEXP_STR}(?:[.#]|::)#{METHOD_REGEXP_STR}
 
-                      # Stand-alone method (preceeded by a #)
+                      # Stand-alone method (preceded by a #)
                       | \\?\##{METHOD_REGEXP_STR}
 
-                      # Stand-alone method (preceeded by ::)
+                      # Stand-alone method (preceded by ::)
                       | ::#{METHOD_REGEXP_STR}
 
                       # A::B::C
@@ -51,7 +51,7 @@ class RDoc::Markup::ToHtmlCrossref < RDoc::Markup::ToHtml
                       # In order that words like "can't" not
                       # be flagged as potential cross-references, only
                       # flag potential class cross-references if the character
-                      # after the cross-referece is a space, sentence
+                      # after the cross-reference is a space, sentence
                       # punctuation, tag start character, or attribute
                       # marker.
                       | #{CLASS_REGEXP_STR}(?=[\s\)\.\?\!\,\;<\000]|\z)
@@ -104,9 +104,10 @@ class RDoc::Markup::ToHtmlCrossref < RDoc::Markup::ToHtml
   # references are removed unless +show_hash+ is true.  Only method names
   # preceded by '#' or '::' are hyperlinked, unless +hyperlink_all+ is true.
 
-  def initialize(from_path, context, show_hash, hyperlink_all = false)
+  def initialize(from_path, context, show_hash, hyperlink_all = false,
+                 markup = nil)
     raise ArgumentError, 'from_path cannot be nil' if from_path.nil?
-    super()
+    super markup
 
     crossref_re = hyperlink_all ? ALL_CROSSREF_REGEXP : CROSSREF_REGEXP
 

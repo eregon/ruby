@@ -30,7 +30,7 @@ struct StringIO {
 
 static void strio_init(int, VALUE *, struct StringIO *);
 
-#define IS_STRIO(obj) (rb_typeddata_is_kind_of(obj, &strio_data_type))
+#define IS_STRIO(obj) (rb_typeddata_is_kind_of((obj), &strio_data_type))
 #define error_inval(msg) (errno = EINVAL, rb_sys_fail(msg))
 
 static struct StringIO *
@@ -80,7 +80,7 @@ static const rb_data_type_t strio_data_type = {
     },
 };
 
-#define check_strio(self) ((struct StringIO*)rb_check_typeddata(self, &strio_data_type))
+#define check_strio(self) ((struct StringIO*)rb_check_typeddata((self), &strio_data_type))
 
 static struct StringIO*
 get_strio(VALUE self)
@@ -921,18 +921,17 @@ strio_getline(int argc, VALUE *argv, struct StringIO *ptr)
 {
     const char *s, *e, *p;
     long n, limit = 0;
-    VALUE str;
+    VALUE str, lim;
 
-    if (argc == 0) {
+    rb_scan_args(argc, argv, "02", &str, &lim);
+    switch (argc) {
+      case 0:
 	str = rb_rs;
-    }
-    else {
-	VALUE lim, tmp;
+	break;
 
-	rb_scan_args(argc, argv, "11", &str, &lim);
-	if (!NIL_P(lim)) limit = NUM2LONG(lim);
-	else if (!NIL_P(str) && TYPE(str) != T_STRING) {
-	    tmp = rb_check_string_type(str);
+      case 1:
+	if (!NIL_P(str) && TYPE(str) != T_STRING) {
+	    VALUE tmp = rb_check_string_type(str);
 	    if (NIL_P(tmp)) {
 		limit = NUM2LONG(str);
 		if (limit == 0) return rb_str_new(0,0);
@@ -942,9 +941,12 @@ strio_getline(int argc, VALUE *argv, struct StringIO *ptr)
 		str = tmp;
 	    }
 	}
-	else if (!NIL_P(str)) {
-	    StringValue(str);
-	}
+	break;
+
+      case 2:
+	if (!NIL_P(str)) StringValue(str);
+	limit = NUM2LONG(lim);
+	break;
     }
 
     if (ptr->pos >= (n = RSTRING_LEN(ptr->string))) {
@@ -1067,6 +1069,11 @@ strio_each(int argc, VALUE *argv, VALUE self)
 
     RETURN_ENUMERATOR(self, argc, argv);
 
+    if (argc > 0 && !NIL_P(argv[argc-1]) && NIL_P(rb_check_string_type(argv[argc-1])) &&
+	NUM2LONG(argv[argc-1]) == 0) {
+	rb_raise(rb_eArgError, "invalid limit: 0 for each_line");
+    }
+
     while (!NIL_P(line = strio_getline(argc, argv, readable(ptr)))) {
 	rb_yield(line);
     }
@@ -1086,6 +1093,12 @@ strio_readlines(int argc, VALUE *argv, VALUE self)
 {
     struct StringIO *ptr = StringIO(self);
     VALUE ary = rb_ary_new(), line;
+
+    if (argc > 0 && !NIL_P(argv[argc-1]) && NIL_P(rb_check_string_type(argv[argc-1])) &&
+	NUM2LONG(argv[argc-1]) == 0) {
+	rb_raise(rb_eArgError, "invalid limit: 0 for readlines");
+    }
+
     while (!NIL_P(line = strio_getline(argc, argv, readable(ptr)))) {
 	rb_ary_push(ary, line);
     }

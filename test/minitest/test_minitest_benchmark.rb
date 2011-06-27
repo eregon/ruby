@@ -1,8 +1,8 @@
-############################################################
-# This file is imported from a different project.
-# DO NOT make modifications in this repo.
-# File a patch instead and assign it to Ryan Davis
-############################################################
+######################################################################
+# This file is imported from the minitest project.
+# DO NOT make modifications in this repo. They _will_ be reverted!
+# File a patch instead and assign it to Ryan Davis.
+######################################################################
 
 require 'minitest/autorun'
 require 'minitest/benchmark'
@@ -48,6 +48,21 @@ class TestMiniTestBenchmark < MiniTest::Unit::TestCase
 
     # verified with Numbers and R
     assert_fit :exponential, x, y, 0.95, 13.81148, -0.1820
+  end
+
+  def test_fit_constant_clean
+    x = (1..5).to_a
+    y = [5.0, 5.0, 5.0, 5.0, 5.0]
+
+    assert_fit :linear, x, y, nil, 5.0, 0
+  end
+
+  def test_fit_constant_noisy
+    x = (1..5).to_a
+    y = [1.0, 1.2, 1.0, 0.8, 1.0]
+
+    # verified in numbers and R
+    assert_fit :linear, x, y, nil, 1.12, -0.04
   end
 
   def test_fit_linear_clean
@@ -96,7 +111,7 @@ class TestMiniTestBenchmark < MiniTest::Unit::TestCase
   def assert_fit msg, x, y, fit, exp_a, exp_b
     a, b, rr = send "fit_#{msg}", x, y
 
-    assert_operator rr, :>=, fit
+    assert_operator rr, :>=, fit if fit
     assert_in_delta exp_a, a
     assert_in_delta exp_b, b
   end

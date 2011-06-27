@@ -30,6 +30,43 @@ class TestRDocCodeObject < XrefTestCase
     assert_equal 'I am a comment', @co.comment
   end
 
+  def test_comment_equals_document
+    doc = RDoc::Markup::Document.new
+    @co.comment = doc
+
+    @co.comment = ''
+
+    assert_equal doc, @co.comment
+  end
+
+  def test_comment_equals_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    refute_equal Encoding::UTF_8, ''.encoding, 'Encoding sanity check'
+
+    input = 'text'
+    input.force_encoding Encoding::UTF_8
+
+    @co.comment = input
+
+    assert_equal 'text', @co.comment
+    assert_equal Encoding::UTF_8, @co.comment.encoding
+  end
+
+  def test_comment_equals_encoding_blank
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    refute_equal Encoding::UTF_8, ''.encoding, 'Encoding sanity check'
+
+    input = ''
+    input.force_encoding Encoding::UTF_8
+
+    @co.comment = input
+
+    assert_equal '', @co.comment
+    assert_equal Encoding::UTF_8, @co.comment.encoding
+  end
+
   def test_document_children_equals
     @co.document_children = false
     refute @co.document_children
@@ -91,6 +128,24 @@ class TestRDocCodeObject < XrefTestCase
     assert @co.document_children
   end
 
+  def test_each_parent
+    parents = []
+
+    @parent_m.each_parent do |code_object|
+      parents << code_object
+    end
+
+    assert_equal [@parent, @xref_data], parents
+  end
+
+  def test_file_name
+    assert_equal nil, @co.file_name
+
+    @co.record_location RDoc::TopLevel.new 'lib/file.rb'
+
+    assert_equal 'lib/file.rb', @co.file_name
+  end
+
   def test_full_name_equals
     @co.full_name = 'hi'
 
@@ -99,6 +154,12 @@ class TestRDocCodeObject < XrefTestCase
     @co.full_name = nil
 
     assert_nil @co.instance_variable_get(:@full_name)
+  end
+
+  def test_line
+    @c1_m.line = 5
+
+    assert_equal 5, @c1_m.line
   end
 
   def test_metadata
@@ -111,6 +172,12 @@ class TestRDocCodeObject < XrefTestCase
     assert_equal expected, @co.metadata
 
     assert_equal 'not_rdoc', @co.metadata['markup']
+  end
+
+  def test_offset
+    @c1_m.offset = 5
+
+    assert_equal 5, @c1_m.offset
   end
 
   def test_parent_file_name

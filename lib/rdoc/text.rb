@@ -46,7 +46,9 @@ module RDoc::Text
 
     text.each_line do |line|
       line.gsub!(/^(.{8}*?)([^\t\r\n]{0,7})\t/) do
-        "#{$1}#{$2}#{' ' * (8 - $2.size)}"
+        r = "#{$1}#{$2}#{' ' * (8 - $2.size)}"
+        r.force_encoding text.encoding if Object.const_defined? :Encoding
+        r
       end until line !~ /\t/
 
       expanded << line
@@ -59,22 +61,17 @@ module RDoc::Text
   # Flush +text+ left based on the shortest line
 
   def flush_left text
-    indents = []
+    indent = 9999
 
     text.each_line do |line|
-      indents << (line =~ /[^\s]/ || 9999)
+      line_indent = line =~ /\S/ || 9999
+      indent = line_indent if indent > line_indent
     end
 
-    indent = indents.min
+    empty = ''
+    empty.force_encoding text.encoding if Object.const_defined? :Encoding
 
-    flush = []
-
-    text.each_line do |line|
-      line[/^ {0,#{indent}}/] = ''
-      flush << line
-    end
-
-    flush.join
+    text.gsub(/^ {0,#{indent}}/, empty)
   end
 
   ##
@@ -97,7 +94,8 @@ module RDoc::Text
     text = strip_hashes text
     text = expand_tabs text
     text = flush_left text
-    strip_newlines text
+    text = strip_newlines text
+    text
   end
 
   ##
@@ -139,25 +137,38 @@ http://rubyforge.org/tracker/?atid=2472&group_id=627&func=browse
 
   def strip_hashes text
     return text if text =~ /^(?>\s*)[^\#]/
-    text.gsub(/^\s*(#+)/) { $1.tr '#',' ' }.gsub(/^\s+$/, '')
+
+    empty = ''
+    empty.force_encoding text.encoding if Object.const_defined? :Encoding
+
+    text.gsub(/^\s*(#+)/) { $1.tr '#', ' ' }.gsub(/^\s+$/, empty)
   end
 
   ##
   # Strips leading and trailing \n characters from +text+
 
   def strip_newlines text
-    text.gsub(/\A\n*(.*?)\n*\z/m, '\1')
+    text.gsub(/\A\n*(.*?)\n*\z/m) do $1 end # block preserves String encoding
   end
 
   ##
   # Strips /* */ style comments
 
   def strip_stars text
-    text = text.gsub %r%Document-method:\s+[\w:.#]+%, ''
-    text.sub!  %r%/\*+%       do " " * $&.length end
-    text.sub!  %r%\*+/%       do " " * $&.length end
-    text.gsub! %r%^[ \t]*\*%m do " " * $&.length end
-    text.gsub(/^\s+$/, '')
+    encoding = text.encoding if Object.const_defined? :Encoding
+
+    text = text.gsub %r%Document-method:\s+[\w:.#=!?]+%, ''
+
+    space = ' '
+    space.force_encoding encoding if encoding
+
+    text.sub!  %r%/\*+%       do space * $&.length end
+    text.sub!  %r%\*+/%       do space * $&.length end
+    text.gsub! %r%^[ \t]*\*%m do space * $&.length end
+
+    empty = ''
+    empty.force_encoding encoding if encoding
+    text.gsub(/^\s+$/, empty)
   end
 
   ##
@@ -253,6 +264,38 @@ http://rubyforge.org/tracker/?atid=2472&group_id=627&func=browse
     end
 
     html
+  end
+
+  ##
+  # Wraps +txt+ to +line_len+
+
+  def wrap(txt, line_len = 76)
+    res = []
+    sp = 0
+    ep = txt.length
+
+    while sp < ep
+      # scan back for a space
+      p = sp + line_len - 1
+      if p >= ep
+        p = ep
+      else
+        while p > sp and txt[p] != ?\s
+          p -= 1
+        end
+        if p <= sp
+          p = sp + line_len
+          while p < ep and txt[p] != ?\s
+            p += 1
+          end
+        end
+      end
+      res << txt[sp...p] << "\n"
+      sp = p
+      sp += 1 while sp < ep and txt[sp] == ?\s
+    end
+
+    res.join.strip
   end
 
 end

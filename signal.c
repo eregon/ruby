@@ -16,33 +16,16 @@
 #include <signal.h>
 #include <stdio.h>
 #include <errno.h>
+#include "atomic.h"
 
-#ifdef _WIN32
-typedef LONG rb_atomic_t;
-
-# define ATOMIC_TEST(var) InterlockedExchange(&(var), 0)
-# define ATOMIC_SET(var, val) InterlockedExchange(&(var), (val))
-# define ATOMIC_INC(var) InterlockedIncrement(&(var))
-# define ATOMIC_DEC(var) InterlockedDecrement(&(var))
-
-#elif defined HAVE_GCC_ATOMIC_BUILTINS
-/* @shyouhei hack to support atomic operations in case of gcc. Gcc
- * has its own pseudo-insns to support them.  See info, or
- * http://gcc.gnu.org/onlinedocs/gcc/Atomic-Builtins.html */
-
-typedef unsigned int rb_atomic_t; /* Anything OK */
-# define ATOMIC_TEST(var) __sync_lock_test_and_set(&(var), 0)
-# define ATOMIC_SET(var, val)  __sync_lock_test_and_set(&(var), (val))
-# define ATOMIC_INC(var) __sync_fetch_and_add(&(var), 1)
-# define ATOMIC_DEC(var) __sync_fetch_and_sub(&(var), 1)
-
-#else
-typedef int rb_atomic_t;
-
-# define ATOMIC_TEST(var) ((var) ? ((var) = 0, 1) : 0)
-# define ATOMIC_SET(var, val) ((var) = (val))
-# define ATOMIC_INC(var) (++(var))
-# define ATOMIC_DEC(var) (--(var))
+#if !defined(_WIN32) && !defined(HAVE_GCC_ATOMIC_BUILTINS)
+rb_atomic_t
+ruby_atomic_exchange(rb_atomic_t *ptr, rb_atomic_t val)
+{
+    rb_atomic_t old = *ptr;
+    *ptr = val;
+    return old;
+}
 #endif
 
 #if defined(__BEOS__) || defined(__HAIKU__)
@@ -359,6 +342,7 @@ rb_f_kill(int argc, VALUE *argv)
     int negative = 0;
     int sig;
     int i;
+    volatile VALUE str;
     const char *s;
 
     rb_secure(2);
@@ -376,11 +360,11 @@ rb_f_kill(int argc, VALUE *argv)
 
       case T_STRING:
 	s = RSTRING_PTR(argv[0]);
+      str_signal:
 	if (s[0] == '-') {
 	    negative++;
 	    s++;
 	}
-      str_signal:
 	if (strncmp("SIG", s, 3) == 0)
 	    s += 3;
 	if((sig = signm2signo(s)) == 0)
@@ -391,17 +375,13 @@ rb_f_kill(int argc, VALUE *argv)
 	break;
 
       default:
-        {
-	    VALUE str;
-
-	    str = rb_check_string_type(argv[0]);
-	    if (!NIL_P(str)) {
-		s = RSTRING_PTR(str);
-		goto str_signal;
-	    }
-	    rb_raise(rb_eArgError, "bad signal type %s",
-		     rb_obj_classname(argv[0]));
+	str = rb_check_string_type(argv[0]);
+	if (!NIL_P(str)) {
+	    s = RSTRING_PTR(str);
+	    goto str_signal;
 	}
+	rb_raise(rb_eArgError, "bad signal type %s",
+		 rb_obj_classname(argv[0]));
 	break;
     }
 
@@ -527,6 +507,7 @@ sighandler(int sig)
 {
     ATOMIC_INC(signal_buff.cnt[sig]);
     ATOMIC_INC(signal_buff.size);
+    rb_thread_wakeup_timer_thread();
 #if !defined(BSD_SIGNAL) && !defined(POSIX_SIGNAL)
     ruby_signal(sig, sighandler);
 #endif
@@ -623,14 +604,6 @@ sigsegv(int sig SIGINFO_ARG)
 	ruby_disable_gc_stress = 1;
 	rb_bug("Segmentation fault");
     }
-}
-#endif
-
-#ifdef SIGPIPE
-static RETSIGTYPE
-sigpipe(int sig)
-{
-    /* do nothing */
 }
 #endif
 
@@ -749,7 +722,7 @@ default_handler(int sig)
 #endif
 #ifdef SIGPIPE
       case SIGPIPE:
-        func = sigpipe;
+        func = SIG_IGN;
         break;
 #endif
       default:
@@ -964,11 +937,15 @@ sig_trap(int argc, VALUE *argv)
 	rb_raise(rb_eSecurityError, "Insecure: tainted signal trap");
     }
 #if USE_TRAP_MASK
-    /* disable interrupt */
-    sigfillset(&arg.mask);
-    pthread_sigmask(SIG_BLOCK, &arg.mask, &arg.mask);
+    {
+      sigset_t fullmask;
 
-    return rb_ensure(trap, (VALUE)&arg, trap_ensure, (VALUE)&arg);
+      /* disable interrupt */
+      sigfillset(&fullmask);
+      pthread_sigmask(SIG_BLOCK, &fullmask, &arg.mask);
+
+      return rb_ensure(trap, (VALUE)&arg, trap_ensure, (VALUE)&arg);
+    }
 #else
     return trap(&arg);
 #endif
@@ -1014,15 +991,17 @@ init_sigchld(int sig)
 #if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
     sigset_t mask;
+    sigset_t fullmask;
 # else
     int mask;
+    int fullmask;
 # endif
 #endif
 
 #if USE_TRAP_MASK
     /* disable interrupt */
-    sigfillset(&mask);
-    pthread_sigmask(SIG_BLOCK, &mask, &mask);
+    sigfillset(&fullmask);
+    pthread_sigmask(SIG_BLOCK, &fullmask, &mask);
 #endif
 
     oldfunc = ruby_signal(sig, SIG_DFL);
@@ -1140,7 +1119,7 @@ Init_signal(void)
 #endif
     }
 #ifdef SIGPIPE
-    install_sighandler(SIGPIPE, sigpipe);
+    install_sighandler(SIGPIPE, SIG_IGN);
 #endif
 
 #if defined(SIGCLD)

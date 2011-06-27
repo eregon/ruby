@@ -78,6 +78,14 @@ class TestIO < Test::Unit::TestCase
     }
   end
 
+  def trapping_usr1
+    @usr1_rcvd  = 0
+    trap(:USR1) { @usr1_rcvd += 1 }
+    yield
+  ensure
+    trap(:USR1, "DEFAULT")
+  end
+
   def test_pipe
     r, w = IO.pipe
     assert_instance_of(IO, r)
@@ -594,6 +602,33 @@ class TestIO < Test::Unit::TestCase
           result = t.value
           assert_equal(megacontent, result)
         }
+        with_socketpair {|s1, s2|
+          begin
+            s1.nonblock = true
+          rescue Errno::EBADF
+            skip "nonblocking IO for pipe is not implemented"
+          end
+          trapping_usr1 do
+            nr = 30
+            begin
+              pid = fork do
+                s1.close
+                IO.select([s2])
+                Process.kill(:USR1, Process.ppid)
+                s2.read
+              end
+              s2.close
+              nr.times do
+                assert_equal megacontent.bytesize, IO.copy_stream("megasrc", s1)
+              end
+              assert_equal(1, @usr1_rcvd)
+            ensure
+              s1.close
+              _, status = Process.waitpid2(pid) if pid
+            end
+            assert status.success?, status.inspect
+          end
+        }
       end
     }
   end
@@ -827,7 +862,7 @@ class TestIO < Test::Unit::TestCase
   def test_ungetc2
     f = false
     pipe(proc do |w|
-      0 until f
+      Thread.pass until f
       w.write("1" * 10000)
       w.close
     end, proc do |r|
@@ -904,7 +939,7 @@ class TestIO < Test::Unit::TestCase
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.readpartial(5, s) }
-      0 until s.size == 5
+      Thread.pass until s.size == 5
       assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
@@ -939,7 +974,7 @@ class TestIO < Test::Unit::TestCase
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.read(5, s) }
-      0 until s.size == 5
+      Thread.pass until s.size == 5
       assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
@@ -1775,5 +1810,169 @@ End
         end
       end
     end
+  end
+
+  def test_fcntl_lock
+    return if /x86_64-linux/ !~ RUBY_PLATFORM # A binary form of struct flock depend on platform
+
+    pad=0
+    Tempfile.open(self.class.name) do |f|
+      r, w = IO.pipe
+      pid = fork do
+        r.close
+        lock = [Fcntl::F_WRLCK, IO::SEEK_SET, pad, 12, 34, 0].pack("s!s!i!L!L!i!")
+        f.fcntl Fcntl::F_SETLKW, lock
+        w.syswrite "."
+        sleep
+      end
+      w.close
+      assert_equal ".", r.read(1)
+      r.close
+      pad = 0
+      getlock = [Fcntl::F_WRLCK, 0, pad, 0, 0, 0].pack("s!s!i!L!L!i!")
+      f.fcntl Fcntl::F_GETLK, getlock
+
+      ptype, whence, pad, start, len, lockpid = getlock.unpack("s!s!i!L!L!i!")
+
+      assert_equal(ptype, Fcntl::F_WRLCK)
+      assert_equal(whence, IO::SEEK_SET)
+      assert_equal(start, 12)
+      assert_equal(len, 34)
+      assert_equal(pid, lockpid)
+
+      Process.kill :TERM, pid
+      Process.waitpid2(pid)
+    end
+  end
+
+  def test_cross_thread_close_fd
+    skip "cross thread close causes hung-up if pipe." if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+    with_pipe do |r,w|
+      read_thread = Thread.new do
+        begin
+          r.read(1)
+        rescue => e
+          e
+        end
+      end
+
+      sleep(0.1) until read_thread.stop?
+      r.close
+      read_thread.join
+      assert_kind_of(IOError, read_thread.value)
+    end
+  end
+
+  def test_cross_thread_close_stdio
+    with_pipe do |r,w|
+      pid = fork do
+        $stdin.reopen(r)
+        r.close
+        read_thread = Thread.new do
+          begin
+            $stdin.read(1)
+          rescue => e
+            e
+          end
+        end
+        sleep(0.1) until read_thread.stop?
+        $stdin.close
+        read_thread.join
+        exit(IOError === read_thread.value)
+      end
+      assert Process.waitpid2(pid)[1].success?
+    end
+    rescue NotImplementedError
+  end
+
+  def test_open_mode
+    feature4742 = "[ruby-core:36338]"
+
+    mkcdtmpdir do
+      refute_nil(f = File.open('symbolic', 'w'))
+      f.close
+      refute_nil(f = File.open('numeric',  File::WRONLY|File::TRUNC|File::CREAT))
+      f.close
+      refute_nil(f = File.open('hash-symbolic', :mode => 'w'))
+      f.close
+      refute_nil(f = File.open('hash-numeric', :mode => File::WRONLY|File::TRUNC|File::CREAT), feature4742)
+      f.close
+    end
+  end
+
+  def test_s_write
+    mkcdtmpdir do
+      path = "test_s_write"
+      File.write(path, "foo\nbar\nbaz")
+      assert_equal("foo\nbar\nbaz", File.read(path))
+      File.write(path, "FOO", 0)
+      assert_equal("FOO\nbar\nbaz", File.read(path))
+      File.write(path, "BAR")
+      assert_equal("BAR", File.read(path))
+      File.write(path, "\u{3042}", mode: "w", encoding: "EUC-JP")
+      assert_equal("\u{3042}".encode("EUC-JP"), File.read(path, encoding: "EUC-JP"))
+      File.delete path
+      assert_equal(6, File.write(path, 'string', 2))
+      File.delete path
+      assert_raise(Errno::EINVAL) { File.write('nonexisting','string', -2) }
+      assert_equal(6, File.write(path, 'string'))
+      assert_equal(3, File.write(path, 'sub', 1))
+      assert_equal("ssubng", File.read(path))
+      File.delete path
+      assert_equal(3, File.write(path, "foo", encoding: "UTF-8"))
+      File.delete path
+      assert_equal(3, File.write(path, "foo", 0, encoding: "UTF-8"))
+      assert_equal("foo", File.read(path))
+      assert_equal(1, File.write(path, "f", 1, encoding: "UTF-8"))
+      assert_equal("ffo", File.read(path))
+      File.delete path
+      assert_equal(1, File.write(path, "f", 1, encoding: "UTF-8"))
+      assert_equal("\00f", File.read(path))
+      assert_equal(1, File.write(path, "f", 0, encoding: "UTF-8"))
+      assert_equal("ff", File.read(path))
+    end
+  end
+
+  def test_s_binwrite
+    mkcdtmpdir do
+      path = "test_s_binwrite"
+      File.binwrite(path, "foo\nbar\nbaz")
+      assert_equal("foo\nbar\nbaz", File.read(path))
+      File.binwrite(path, "FOO", 0)
+      assert_equal("FOO\nbar\nbaz", File.read(path))
+      File.binwrite(path, "BAR")
+      assert_equal("BAR", File.read(path))
+      File.binwrite(path, "\u{3042}")
+      assert_equal("\u{3042}".force_encoding("ASCII-8BIT"), File.binread(path))
+      File.delete path
+      assert_equal(6, File.binwrite(path, 'string', 2))
+      File.delete path
+      assert_equal(6, File.binwrite(path, 'string'))
+      assert_equal(3, File.binwrite(path, 'sub', 1))
+      assert_equal("ssubng", File.binread(path))
+      assert_equal(6, File.size(path))
+      assert_raise(Errno::EINVAL) { File.binwrite('nonexisting', 'string', -2) }
+      assert_nothing_raised(TypeError) { File.binwrite(path, "string", mode: "w", encoding: "EUC-JP") }
+    end
+  end
+
+  def test_race_between_read
+    file = Tempfile.new("test")
+    path = file.path
+    file.close
+    write_file = File.open(path, "wt")
+    read_file = File.open(path, "rt")
+
+    threads = []
+    10.times do |i|
+      threads << Thread.new {write_file.print(i)}
+      threads << Thread.new {read_file.read}
+    end
+    threads.each {|t| t.join}
+    assert(true, "[ruby-core:37197]")
+  ensure
+    read_file.close
+    write_file.close
+    file.close!
   end
 end

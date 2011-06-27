@@ -176,7 +176,7 @@ class TestTime < Test::Unit::TestCase
 
     t = Time.at(2**40 + "1/3".to_r, 9999999999999).utc
     assert_equal(36812, t.year)
-    
+
     t = Time.at(-0x3fff_ffff_ffff_ffff)
     assert_equal(-146138510344, t.year)
     t = Time.at(-0x4000_0000_0000_0000)
@@ -589,6 +589,18 @@ class TestTime < Test::Unit::TestCase
     assert_equal(" 2", t.strftime("%l"))
     assert_equal("02", t.strftime("%0l"))
     assert_equal(" 2", t.strftime("%_l"))
+
+    t = Time.utc(1,1,4)
+    assert_equal("0001", t.strftime("%Y"))
+    assert_equal("0001", t.strftime("%G"))
+
+    t = Time.utc(0,1,4)
+    assert_equal("0000", t.strftime("%Y"))
+    assert_equal("0000", t.strftime("%G"))
+
+    t = Time.utc(-1,1,4)
+    assert_equal("-0001", t.strftime("%Y"))
+    assert_equal("-0001", t.strftime("%G"))
 
     # [ruby-dev:37155]
     t = Time.mktime(1970, 1, 18)

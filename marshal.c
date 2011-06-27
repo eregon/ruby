@@ -14,6 +14,7 @@
 #include "ruby/st.h"
 #include "ruby/util.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 
 #include <math.h>
 #ifdef HAVE_FLOAT_H
@@ -81,8 +82,6 @@ shortlen(long len, BDIGIT *ds)
 static ID s_dump, s_load, s_mdump, s_mload;
 static ID s_dump_data, s_load_data, s_alloc, s_call;
 static ID s_getbyte, s_read, s_write, s_binmode;
-
-ID rb_id_encoding(void);
 
 typedef struct {
     VALUE newclass;
@@ -864,7 +863,7 @@ clear_dump_arg(struct dump_arg *arg)
 
 /*
  * call-seq:
- *      dump( obj [, anIO] , limit=--1 ) -> anIO
+ *      dump( obj [, anIO] , limit=-1 ) -> anIO
  *
  * Serializes obj and all descendant objects. If anIO is
  * specified, the serialized data will be written to it, otherwise the
@@ -876,7 +875,7 @@ clear_dump_arg(struct dump_arg *arg)
  *       def initialize(str)
  *         @str = str
  *       end
- *       def sayHello
+ *       def say_hello
  *         @str
  *       end
  *     end
@@ -886,7 +885,7 @@ clear_dump_arg(struct dump_arg *arg)
  *     o = Klass.new("hello\n")
  *     data = Marshal.dump(o)
  *     obj = Marshal.load(data)
- *     obj.sayHello   #=> "hello\n"
+ *     obj.say_hello  #=> "hello\n"
  *
  * Marshal can't dump following objects:
  * * anonymous Class/Module.

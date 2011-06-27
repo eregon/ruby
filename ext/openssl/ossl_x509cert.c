@@ -11,20 +11,20 @@
 #include "ossl.h"
 
 #define WrapX509(klass, obj, x509) do { \
-    if (!x509) { \
+    if (!(x509)) { \
 	ossl_raise(rb_eRuntimeError, "CERT wasn't initialized!"); \
     } \
-    obj = Data_Wrap_Struct(klass, 0, X509_free, x509); \
+    (obj) = Data_Wrap_Struct((klass), 0, X509_free, (x509)); \
 } while (0)
 #define GetX509(obj, x509) do { \
-    Data_Get_Struct(obj, X509, x509); \
-    if (!x509) { \
+    Data_Get_Struct((obj), X509, (x509)); \
+    if (!(x509)) { \
 	ossl_raise(rb_eRuntimeError, "CERT wasn't initialized!"); \
     } \
 } while (0)
 #define SafeGetX509(obj, x509) do { \
-    OSSL_Check_Kind(obj, cX509Cert); \
-    GetX509(obj, x509); \
+    OSSL_Check_Kind((obj), cX509Cert); \
+    GetX509((obj), (x509)); \
 } while (0)
 
 /*
@@ -71,6 +71,7 @@ ossl_x509_new_from_file(VALUE filename)
      * prepare for DER...
 #if !defined(OPENSSL_NO_FP_API)
     if (!x509) {
+    	(void)ERR_get_error();
 	rewind(fp);
 
 	x509 = d2i_X509_fp(fp, NULL);
@@ -146,7 +147,7 @@ ossl_x509_initialize(int argc, VALUE *argv, VALUE self)
     x509 = PEM_read_bio_X509(in, &x, NULL, NULL);
     DATA_PTR(self) = x;
     if (!x509) {
-	(void)BIO_reset(in);
+	OSSL_BIO_reset(in);
 	x509 = d2i_X509_bio(in, &x);
 	DATA_PTR(self) = x;
     }

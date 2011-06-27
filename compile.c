@@ -10,6 +10,7 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "internal.h"
 #include <math.h>
 
 #define USE_INSN_STACK_INCREASE 1
@@ -97,8 +98,6 @@ struct iseq_compile_data_ensure_node_stack {
 #define compile_debug iseq->compile_data->option->debug_level
 #endif
 
-NORETURN(PRINTF_ARGS(void rb_compile_bug(const char*, int, const char*, ...), 3, 4));
-
 #if CPDEBUG
 
 #define compile_debug_print_indent(level) \
@@ -155,7 +154,6 @@ r_value(VALUE value)
 #endif
 
 #if CPDEBUG > 1 || CPDEBUG < 0
-PRINTF_ARGS(void ruby_debug_printf(const char*, ...), 1, 2);
 #define debugs if (compile_debug_print_indent(1)) ruby_debug_printf
 #define debug_compile(msg, v) ((void)(compile_debug_print_indent(1) && fputs((msg), stderr)), (v))
 #else
@@ -539,7 +537,6 @@ int
 rb_iseq_translate_threaded_code(rb_iseq_t *iseq)
 {
 #if OPT_DIRECT_THREADED_CODE || OPT_CALL_THREADED_CODE
-    extern const void **rb_vm_get_insns_address_table(void);
     const void * const *table = rb_vm_get_insns_address_table();
     unsigned long i;
 
@@ -4680,10 +4677,10 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 		node->nd_body,
 		rb_sprintf("<class:%s>", rb_id2name(node->nd_cpath->nd_mid)),
 		ISEQ_TYPE_CLASS, nd_line(node));
-	compile_cpath(ret, iseq, node->nd_cpath);
+	VALUE noscope = compile_cpath(ret, iseq, node->nd_cpath);
 	COMPILE(ret, "super", node->nd_super);
 	ADD_INSN3(ret, nd_line(node), defineclass,
-		  ID2SYM(node->nd_cpath->nd_mid), iseqval, INT2FIX(0));
+		  ID2SYM(node->nd_cpath->nd_mid), iseqval, INT2FIX(noscope ? 3 : 0));
 
 	if (poped) {
 	    ADD_INSN(ret, nd_line(node), pop);
@@ -4696,10 +4693,10 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	    rb_sprintf("<module:%s>", rb_id2name(node->nd_cpath->nd_mid)),
 	    ISEQ_TYPE_CLASS, nd_line(node));
 
-	compile_cpath(ret, iseq, node->nd_cpath);
+	VALUE noscope = compile_cpath(ret, iseq, node->nd_cpath);
 	ADD_INSN (ret, nd_line(node), putnil); /* dummy */
 	ADD_INSN3(ret, nd_line(node), defineclass,
-		  ID2SYM(node->nd_cpath->nd_mid), iseqval, INT2FIX(2));
+		  ID2SYM(node->nd_cpath->nd_mid), iseqval, INT2FIX(noscope ? 5 : 2));
 	if (poped) {
 	    ADD_INSN(ret, nd_line(node), pop);
 	}
@@ -4968,7 +4965,18 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 
 	    if (flag & VM_CALL_ARGS_BLOCKARG_BIT) {
 		ADD_INSN1(ret, nd_line(node), topn, INT2FIX(1));
+		if (flag & VM_CALL_ARGS_SPLAT_BIT) {
+		    ADD_INSN1(ret, nd_line(node), putobject, INT2FIX(-1));
+		    ADD_SEND(ret, nd_line(node), ID2SYM(idAREF), INT2FIX(1));
+		}
 		ADD_INSN1(ret, nd_line(node), setn, FIXNUM_INC(argc, 3));
+		ADD_INSN (ret, nd_line(node), pop);
+	    }
+	    else if (flag & VM_CALL_ARGS_SPLAT_BIT) {
+		ADD_INSN(ret, nd_line(node), dup);
+		ADD_INSN1(ret, nd_line(node), putobject, INT2FIX(-1));
+		ADD_SEND(ret, nd_line(node), ID2SYM(idAREF), INT2FIX(1));
+		ADD_INSN1(ret, nd_line(node), setn, FIXNUM_INC(argc, 2));
 		ADD_INSN (ret, nd_line(node), pop);
 	    }
 	    else {
@@ -5190,6 +5198,7 @@ get_exception_sym2type(VALUE sym)
 {
 #undef rb_intern
 #define rb_intern(str) rb_intern_const(str)
+    VALUE sym_inspect;
     static VALUE symRescue, symEnsure, symRetry;
     static VALUE symBreak, symRedo, symNext;
 
@@ -5208,8 +5217,9 @@ get_exception_sym2type(VALUE sym)
     if (sym == symBreak)  return CATCH_TYPE_BREAK;
     if (sym == symRedo)   return CATCH_TYPE_REDO;
     if (sym == symNext)   return CATCH_TYPE_NEXT;
+    sym_inspect = rb_inspect(sym);
     rb_raise(rb_eSyntaxError, "invalid exception symbol: %s",
-	     RSTRING_PTR(rb_inspect(sym)));
+	     StringValuePtr(sym_inspect));
     return 0;
 }
 

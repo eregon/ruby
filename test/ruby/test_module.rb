@@ -73,9 +73,10 @@ class TestModule < Test::Unit::TestCase
   end
 
   def remove_rake_mixins(list)
-    list.
-      reject {|c| c.to_s == "RakeFileUtils" }.
-      reject {|c| c.to_s.start_with?("FileUtils") }
+    list.reject {|c|
+      name = c.name
+      name.start_with?("Rake") or name.start_with?("FileUtils")
+    }
   end
 
   module Mixin
@@ -141,7 +142,7 @@ class TestModule < Test::Unit::TestCase
       :bClass3
     end
   end
-  
+
   class CClass < BClass
     def self.cClass
     end
@@ -403,6 +404,11 @@ class TestModule < Test::Unit::TestCase
       p Module.constants - ary, Module.constants(true), Module.constants(false)
     INPUT
     assert_in_out_err([], src, %w([:M] [:WALTER] []), [])
+
+    klass = Class.new do
+      const_set(:X, 123)
+    end
+    assert_equal(false, klass.class_eval { Module.constants }.include?(:X))
   end
 
   module M1
@@ -947,6 +953,28 @@ class TestModule < Test::Unit::TestCase
     c.private_constant(:FOO)
     assert_raise(NameError) { c::FOO }
     assert_equal("foo", c.class_eval("FOO"))
+    assert_equal("foo", c.const_get("FOO"))
+    $VERBOSE, verbose = nil, $VERBOSE
+    c.const_set(:FOO, "foo")
+    $VERBOSE = verbose
+    assert_raise(NameError) { c::FOO }
+  end
+
+  class PrivateClass
+  end
+  private_constant :PrivateClass
+
+  def test_define_module_under_private_constant
+    assert_raise(NameError) do
+      eval %q{class TestModule::PrivateClass; end}
+    end
+    assert_raise(NameError) do
+      eval %q{module TestModule::PrivateClass::TestModule; end}
+    end
+    eval %q{class PrivateClass; end}
+    eval %q{module PrivateClass::TestModule; end}
+    assert_instance_of(Module, PrivateClass::TestModule)
+    PrivateClass.class_eval { remove_const(:TestModule) }
   end
 
   def test_public_constant
@@ -958,5 +986,146 @@ class TestModule < Test::Unit::TestCase
     assert_equal("foo", c.class_eval("FOO"))
     c.public_constant(:FOO)
     assert_equal("foo", c::FOO)
+  end
+
+  def test_constants_with_private_constant
+    assert(!(::TestModule).constants.include?(:PrivateClass))
+  end
+
+  def test_toplevel_private_constant
+    src = <<-INPUT
+      class Object
+        private_constant :Object
+      end
+      p Object
+      begin
+        p ::Object
+      rescue
+        p :ok
+      end
+    INPUT
+    assert_in_out_err([], src, %w(Object :ok), [])
+  end
+
+  def test_constant_lookup_in_method_defined_by_class_eval
+    src = <<-INPUT
+      class A
+        B = 42
+      end
+
+      A.class_eval do
+        def self.f
+          B
+        end
+
+        def f
+          B
+        end
+      end
+
+      begin
+        A.f
+      rescue NameError
+        puts "A.f"
+      end
+      begin
+        A.new.f
+      rescue NameError
+        puts "A.new.f"
+      end
+    INPUT
+    assert_in_out_err([], src, %w(A.f A.new.f), [])
+  end
+
+  def test_constant_lookup_in_toplevel_class_eval
+    src = <<-INPUT
+      module X
+        A = 123
+      end
+      begin
+        X.class_eval { A }
+      rescue NameError => e
+        puts e
+      end
+    INPUT
+    assert_in_out_err([], src, ["uninitialized constant A"], [])
+  end
+
+  def test_constant_lookup_in_module_in_class_eval
+    src = <<-INPUT
+      class A
+        B = 42
+      end
+
+      A.class_eval do
+        module C
+          begin
+            B
+          rescue NameError
+            puts "NameError"
+          end
+        end
+      end
+    INPUT
+    assert_in_out_err([], src, ["NameError"], [])
+  end
+
+  def test_mix_method
+    american = Module.new do
+      attr_accessor :address
+    end
+    japanese = Module.new do
+      attr_accessor :address
+    end
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {mix american}
+    }
+    assert_raise(ArgumentError) {
+      japanese_american.class_eval {mix japanese}
+    }
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix american, :address => :us_address, :address= => :us_address=
+      }
+    }
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix japanese, :address => :jp_address, :address= => :jp_address=
+      }
+    }
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix japanese, :address => nil, :address= => nil
+      }
+    }
+    assert_raise(NoMethodError) {
+      japanese_american.new.address
+    }
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix american
+      }
+    }
+  end
+
+  def test_mix_const
+    foo = Module.new do
+      const_set(:D, 55)
+    end
+    bar = Class.new do
+      const_set(:D, 42)
+    end
+    assert_nothing_raised(ArgumentError) {
+      bar.class_eval {
+        mix foo
+      }
+    }
+    assert_equal(42, bar::D)
   end
 end

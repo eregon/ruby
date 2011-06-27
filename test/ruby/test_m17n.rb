@@ -811,15 +811,15 @@ class TestM17N < Test::Unit::TestCase
   end
 
   def test_sprintf_p
-    enc = "".inspect.encoding
-    asc = Encoding::US_ASCII
     Encoding.list.each do |e|
       format = "%p".force_encoding(e)
       ['', 'a', "\xC2\xA1", "\x00"].each do |s|
         s.force_encoding(e)
-        assert_strenc(s.inspect, e.ascii_compatible? && enc == asc ? e : enc, format % s)
+        enc = (''.force_encoding(e) + s.inspect).encoding
+        assert_strenc(s.inspect, enc, format % s)
       end
       s = "\xC2\xA1".force_encoding(e)
+      enc = ('' + s.inspect).encoding
       assert_strenc('%10s' % s.inspect, enc, "%10p" % s)
     end
   end
@@ -933,6 +933,10 @@ class TestM17N < Test::Unit::TestCase
   def test_aset
     s = e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4")
     assert_raise(Encoding::CompatibilityError){s["\xb0\xa3"] = "foo"}
+
+    a = ua("a")
+    a[/a/] = u("")
+    assert_equal Encoding::US_ASCII, a.encoding
   end
 
   def test_str_center
@@ -958,6 +962,7 @@ class TestM17N < Test::Unit::TestCase
 
     assert_equal("X\u3042\u3044X", "A\u3042\u3044\u3046".tr("^\u3042\u3044", "X"))
     assert_equal("\u3042\u3046" * 100, ("\u3042\u3044" * 100).tr("\u3044", "\u3046"))
+    assert_equal("Y", "\u3042".tr("^X", "Y"))
   end
 
   def test_tr_s
@@ -1086,7 +1091,6 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(false, s.ascii_only?, "[ruby-core:14566] reported by Sam Ruby")
 
     s = "abc".force_encoding(Encoding::ASCII_8BIT)
-    t = s.gsub(/b/, "\xa1\xa1".force_encoding("euc-jp"))
     assert_equal(Encoding::ASCII_8BIT, s.encoding)
 
     assert_raise(Encoding::CompatibilityError) {
@@ -1098,14 +1102,20 @@ class TestM17N < Test::Unit::TestCase
     s = e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4")
     assert_equal(e("\xa3\xb0z\xa3\xb2\xa3\xb3\xa3\xb4"), s.gsub(/\xa3\xb1/e, "z"))
 
-    assert_equal(Encoding::EUC_JP, (a("").gsub(//) { e("") }.encoding))
-    assert_equal(Encoding::EUC_JP, (a("a").gsub(/a/) { e("") }.encoding))
+    assert_equal(Encoding::ASCII_8BIT, (a("").gsub(//) { e("") }.encoding))
+    assert_equal(Encoding::ASCII_8BIT, (a("a").gsub(/a/) { e("") }.encoding))
   end
 
   def test_end_with
     s1 = s("\x81\x40")
     s2 = "@"
     assert_equal(false, s1.end_with?(s2), "#{encdump s1}.end_with?(#{encdump s2})")
+    each_encoding("\u3042\u3044", "\u3044") do |_s1, _s2|
+      assert_equal(true, _s1.end_with?(_s2), "#{encdump _s1}.end_with?(#{encdump _s2})")
+    end
+    each_encoding("\u3042a\u3044", "a\u3044") do |_s1, _s2|
+      assert_equal(true, _s1.end_with?(_s2), "#{encdump _s1}.end_with?(#{encdump _s2})")
+    end
   end
 
   def test_each_line
@@ -1140,6 +1150,10 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(e("\xa1\xa2\xa1\xa3").split(//),
                  [e("\xa1\xa2"), e("\xa1\xa3")],
                  '[ruby-dev:32452]')
+
+    each_encoding("abc,def", ",", "abc", "def") do |str, sep, *expected|
+      assert_equal(expected, str.split(sep, -1))
+    end
   end
 
   def test_nonascii_method_name
@@ -1178,6 +1192,10 @@ class TestM17N < Test::Unit::TestCase
       assert_equal([b].pack("C"), b.chr)
     }
     assert_equal("\x84\x31\xA4\x39".force_encoding("GB18030"), 0x8431A439.chr("GB18030"))
+    e = assert_raise(RangeError) {
+      2206368128.chr(Encoding::UTF_8)
+    }
+    assert_not_match(/-\d+ out of char range/, e.message)
   end
 
   def test_marshal
@@ -1384,5 +1402,13 @@ class TestM17N < Test::Unit::TestCase
 
   def test_combchar_codepoint
     assert_equal([0x30BB, 0x309A], "\u30BB\u309A".codepoints.to_a)
+  end
+
+  def each_encoding(*strings)
+    Encoding.list.each do |enc|
+      next if enc.dummy?
+      strs = strings.map {|s| s.encode(enc)} rescue next
+      yield(*strs)
+    end
   end
 end

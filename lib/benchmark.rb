@@ -1,5 +1,4 @@
-=begin
-#
+#--
 # benchmark.rb - a performance benchmarking library
 #
 # $Id$
@@ -8,9 +7,8 @@
 #
 # Documentation by Gotoken (original RD), Lyle Johnson (RDoc conversion), and
 # Gavin Sinclair (editing).
+#++
 #
-=end
-
 # == Overview
 #
 # The Benchmark module provides methods for benchmarking Ruby code, giving
@@ -266,9 +264,9 @@ module Benchmark
       GC.start
       print label.ljust(width)
       Benchmark.measure(&item).tap { |res| print res.format }
-    }.tap {
-      STDOUT.sync = sync
     }
+  ensure
+    STDOUT.sync = sync unless sync.nil?
   end
 
   #
@@ -377,7 +375,11 @@ module Benchmark
   # measurement.
   #
   class Tms
+
+    # Default caption, see also Benchmark::CAPTION
     CAPTION = "      user     system      total        real\n"
+
+    # Default format string, see also Benchmark::FORMAT
     FORMAT = "%10.6u %10.6y %10.6t %10.6r\n"
 
     # User CPU time
@@ -508,6 +510,15 @@ module Benchmark
     end
 
     protected
+    
+    #
+    # Returns a new Tms object obtained by memberwise operation +op+
+    # of the individual times for this Tms object with those of the other
+    # Tms object.
+    #
+    # +op+ can be a mathematical operation such as <tt>+</tt>, <tt>-</tt>,
+    # <tt>*</tt>, <tt>/</tt>
+    #
     def memberwise(op, x)
       case x
       when Benchmark::Tms

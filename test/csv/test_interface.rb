@@ -81,7 +81,7 @@ class TestCSV::Interface < TestCSV
     assert_equal(nil,       CSV.parse_line(""))  # to signal eof
     assert_equal(Array.new, CSV.parse_line("\n1,2,3"))
   end
-  
+
   def test_read_and_readlines
     assert_equal( @expected,
                   CSV.read(@path, col_sep: "\t", row_sep: "\r\n") )
@@ -110,6 +110,14 @@ class TestCSV::Interface < TestCSV
       assert_equal(@expected.shift, csv.shift)
       assert_equal(@expected.shift, csv.shift)
       assert_equal(nil, csv.shift)
+    end
+  end
+  
+  def test_enumerators_are_supported
+    CSV.open(@path, col_sep: "\t", row_sep: "\r\n") do |csv|
+      enum = csv.each
+      assert_instance_of(Enumerator, enum)
+      assert_equal(@expected.shift, enum.next)
     end
   end
 

@@ -4,11 +4,11 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems'
 require 'rubygems/package_task'
 
-class TestGemPackageTask < RubyGemTestCase
+class TestGemPackageTask < Gem::TestCase
 
   def test_gem_package
     gem = Gem::Specification.new do |g|
@@ -46,6 +46,19 @@ class TestGemPackageTask < RubyGemTestCase
       p.package_files << "y"
     end
     assert_equal ["x", "y"], pkg.package_files
+  end
+
+  def test_package_dir_path
+    gem = Gem::Specification.new do |g|
+      g.name = 'nokogiri'
+      g.version = '1.5.0'
+      g.platform = 'java'
+    end
+
+    pkg = Gem::PackageTask.new gem
+    pkg.define
+
+    assert_equal 'pkg/nokogiri-1.5.0-java', pkg.package_dir_path
   end
 
 end

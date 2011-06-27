@@ -4,14 +4,15 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems/commands/cert_command'
+require 'rubygems/fix_openssl_warnings' if RUBY_VERSION < "1.9"
 
 unless defined? OpenSSL then
   warn "`gem cert` tests are being skipped, module OpenSSL not found"
 end
 
-class TestGemCommandsCertCommand < RubyGemTestCase
+class TestGemCommandsCertCommand < Gem::TestCase
 
   def setup
     super
@@ -21,7 +22,7 @@ class TestGemCommandsCertCommand < RubyGemTestCase
 
     @cmd = Gem::Commands::CertCommand.new
 
-    root = File.expand_path(File.dirname(__FILE__))
+    root = File.expand_path(File.dirname(__FILE__), @@project_dir)
 
     FileUtils.cp File.join(root, 'data', 'gem-private_key.pem'), @tempdir
     FileUtils.cp File.join(root, 'data', 'gem-public_cert.pem'), @tempdir

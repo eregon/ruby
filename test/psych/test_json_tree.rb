@@ -1,4 +1,4 @@
-require_relative 'helper'
+require 'psych/helper'
 
 module Psych
   class TestJSONTree < TestCase
@@ -31,6 +31,17 @@ module Psych
       assert_match(/['"]two['"]/, json)
     end
 
+    class Bar
+      def encode_with coder
+        coder.represent_seq 'omg', %w{ a b c }
+      end
+    end
+
+    def test_json_list_dump_exclude_tag
+      json = Psych.to_json Bar.new
+      refute_match('omg', json)
+    end
+
     def test_list_to_json
       list = %w{ one two }
       json = Psych.to_json(list)
@@ -42,7 +53,7 @@ module Psych
 
     def test_time
       time = Time.utc(2010, 10, 10)
-      assert_equal "{\"a\": \"2010-10-10 00:00:00.000000000Z\"}\n",
+      assert_equal "{\"a\": \"2010-10-10 00:00:00.000000000 Z\"}\n",
 Psych.to_json({'a' => time })
     end
 

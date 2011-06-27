@@ -197,6 +197,13 @@ Options may also be set in the 'RI' environment variable.
 
       opt.separator nil
 
+      opt.on("--list", "-l",
+             "List classes ri knows about.") do
+        options[:list] = true
+      end
+
+      opt.separator nil
+
       opt.on("--[no-]profile",
              "Run with the ruby profiler") do |value|
         options[:profile] = value
@@ -331,6 +338,7 @@ Options may also be set in the 'RI' environment variable.
     require 'profile' if options[:profile]
 
     @names = options[:names]
+    @list = options[:list]
 
     @doc_dirs = []
     @stores   = []
@@ -448,9 +456,13 @@ Options may also be set in the 'RI' environment variable.
     out << RDoc::Markup::Heading.new(1, "#{name}:")
     out << RDoc::Markup::BlankLine.new
 
-    out.push(*methods.map do |method|
-      RDoc::Markup::Verbatim.new method
-    end)
+    if @use_stdout and !@interactive
+      out.push(*methods.map do |method|
+        RDoc::Markup::Verbatim.new method
+      end)
+    else
+      out << RDoc::Markup::IndentedParagraph.new(2, methods.join(', '))
+    end
 
     out << RDoc::Markup::BlankLine.new
   end
@@ -524,7 +536,11 @@ Options may also be set in the 'RI' environment variable.
     klass_name = method ? name : klass
 
     if name !~ /#|\./ then
-      completions.push(*klasses.grep(/^#{klass_name}/))
+      completions = klasses.grep(/^#{Regexp.escape klass_name}[^:]*$/)
+      completions.concat klasses.grep(/^#{Regexp.escape name}[^:]*$/) if
+        name =~ /::$/
+
+      completions << klass if classes.key? klass # to complete a method name
     elsif selector then
       completions << klass if classes.key? klass
     elsif classes.key? klass_name then
@@ -546,7 +562,7 @@ Options may also be set in the 'RI' environment variable.
       completions.push(*methods)
     end
 
-    completions.sort
+    completions.sort.uniq
   end
 
   ##
@@ -651,12 +667,14 @@ Options may also be set in the 'RI' environment variable.
 
     raise NotFoundError, name if found.empty?
 
+    filtered = filter_methods found, name
+
     out = RDoc::Markup::Document.new
 
     out << RDoc::Markup::Heading.new(1, name)
     out << RDoc::Markup::BlankLine.new
 
-    found.each do |store, methods|
+    filtered.each do |store, methods|
       methods.each do |method|
         out << RDoc::Markup::Paragraph.new("(from #{store.friendly_path})")
 
@@ -751,6 +769,21 @@ Options may also be set in the 'RI' environment variable.
     return [selector, method].join if klass.empty?
 
     "#{expand_class klass}#{selector}#{method}"
+  end
+
+  ##
+  # Filters the methods in +found+ trying to find a match for +name+.
+
+  def filter_methods found, name
+    regexp = name_regexp name
+
+    filtered = found.find_all do |store, methods|
+      methods.any? { |method| method.full_name =~ regexp }
+    end
+
+    return filtered unless filtered.empty?
+
+    found
   end
 
   ##
@@ -861,9 +894,10 @@ Options may also be set in the 'RI' environment variable.
   end
 
   ##
-  # Lists classes known to ri
+  # Lists classes known to ri starting with +names+.  If +names+ is empty all
+  # known classes are shown.
 
-  def list_known_classes
+  def list_known_classes names = []
     classes = []
 
     stores.each do |store|
@@ -872,9 +906,19 @@ Options may also be set in the 'RI' environment variable.
 
     classes = classes.flatten.uniq.sort
 
+    unless names.empty? then
+      filter = Regexp.union names.map { |name| /^#{name}/ }
+
+      classes = classes.grep filter
+    end
+
     page do |io|
       if paging? or io.tty? then
-        io.puts "Classes and Modules known to ri:"
+        if names.empty? then
+          io.puts "Classes and Modules known to ri:"
+        else
+          io.puts "Classes and Modules starting with #{names.join ', '}:"
+        end
         io.puts
       end
 
@@ -893,7 +937,7 @@ Options may also be set in the 'RI' environment variable.
         methods = store.instance_methods[ancestor]
 
         if methods then
-          matches = methods.grep(/^#{method}/)
+          matches = methods.grep(/^#{Regexp.escape method.to_s}/)
 
           matches = matches.map do |match|
             "#{klass}##{match}"
@@ -907,7 +951,7 @@ Options may also be set in the 'RI' environment variable.
         methods = store.class_methods[ancestor]
 
         next unless methods
-        matches = methods.grep(/^#{method}/)
+        matches = methods.grep(/^#{Regexp.escape method.to_s}/)
 
         matches = matches.map do |match|
           "#{klass}::#{match}"
@@ -948,10 +992,10 @@ Options may also be set in the 'RI' environment variable.
       methods = []
 
       methods << load_method(store, :class_methods, ancestor, '::',  method) if
-        types == :class or types == :both
+        [:class, :both].include? types
 
       methods << load_method(store, :instance_methods, ancestor, '#',  method) if
-        types == :instance or types == :both
+        [:instance, :both].include? types
 
       found << [store, methods.compact]
     end
@@ -967,6 +1011,21 @@ Options may also be set in the 'RI' environment variable.
     when '.', nil then :both
     when '#'      then :instance
     else               :class
+    end
+  end
+
+  ##
+  # Returns a regular expression for +name+ that will match an
+  # RDoc::AnyMethod's name.
+
+  def name_regexp name
+    klass, type, name = parse_name name
+
+    case type
+    when '#', '::' then
+      /^#{klass}#{type}#{Regexp.escape name}$/
+    else
+      /^#{klass}(#|::)#{Regexp.escape name}$/
     end
   end
 
@@ -996,7 +1055,7 @@ Options may also be set in the 'RI' environment variable.
   end
 
   ##
-  # Extract the class, selector and method name parts from +name+ like
+  # Extracts the class, selector and method name parts from +name+ like
   # Foo::Bar#baz.
   #
   # NOTE: Given Foo::Bar, Bar is considered a class even though it may be a
@@ -1032,10 +1091,10 @@ Options may also be set in the 'RI' environment variable.
   def run
     if @list_doc_dirs then
       puts @doc_dirs
-    elsif @interactive then
+    elsif @list then
+      list_known_classes @names
+    elsif @interactive or @names.empty? then
       interactive
-    elsif @names.empty? then
-      list_known_classes
     else
       display_names @names
     end

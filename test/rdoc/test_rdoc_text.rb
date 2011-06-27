@@ -55,6 +55,18 @@ class TestRDocText < MiniTest::Unit::TestCase
                  expand_tabs(".\t\t."), 'dot tab tab dot')
   end
 
+  def test_expand_tabs_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    inn = "hello\ns\tdave"
+    inn.force_encoding Encoding::BINARY
+
+    out = expand_tabs inn
+
+    assert_equal "hello\ns       dave", out
+    assert_equal Encoding::BINARY, out.encoding
+  end
+
   def test_flush_left
     text = <<-TEXT
 
@@ -71,6 +83,31 @@ The comments associated with
     EXPECTED
 
     assert_equal expected, flush_left(text)
+  end
+
+  def test_flush_left_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    text = <<-TEXT
+
+  we don't worry too much.
+
+  The comments associated with
+    TEXT
+
+    text.force_encoding Encoding::US_ASCII
+
+    expected = <<-EXPECTED
+
+we don't worry too much.
+
+The comments associated with
+    EXPECTED
+
+    result = flush_left text
+
+    assert_equal expected, result
+    assert_equal Encoding::US_ASCII, result.encoding
   end
 
   def test_markup
@@ -134,6 +171,31 @@ The comments associated with
     assert_equal expected, strip_hashes(text)
   end
 
+  def test_strip_hashes_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    text = <<-TEXT
+##
+# we don't worry too much.
+#
+# The comments associated with
+    TEXT
+
+    text.force_encoding Encoding::CP852
+
+    expected = <<-EXPECTED
+
+  we don't worry too much.
+
+  The comments associated with
+    EXPECTED
+
+    stripped = strip_hashes text
+
+    assert_equal expected, stripped
+    assert_equal Encoding::CP852, stripped.encoding
+  end
+
   def test_strip_newlines
     assert_equal ' ',  strip_newlines("\n \n")
 
@@ -142,6 +204,21 @@ The comments associated with
     assert_equal 'hi', strip_newlines(    "hi\n\n")
 
     assert_equal 'hi', strip_newlines("\n\nhi\n\n")
+  end
+
+  def test_strip_newlines_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    assert_equal Encoding::UTF_8, ''.encoding, 'Encoding sanity check'
+
+    text = " \n"
+    text.force_encoding Encoding::US_ASCII
+
+    stripped = strip_newlines text
+
+    assert_equal ' ', stripped
+
+    assert_equal Encoding::US_ASCII, stripped.encoding
   end
 
   def test_strip_stars
@@ -161,6 +238,75 @@ The comments associated with
     EXPECTED
 
     assert_equal expected, strip_stars(text)
+  end
+
+  def test_strip_stars_document_method
+    text = <<-TEXT
+/*
+ * Document-method: Zlib::GzipFile#mtime=
+ *
+ * A comment
+ */
+    TEXT
+
+    expected = <<-EXPECTED
+
+   A comment
+    EXPECTED
+
+    assert_equal expected, strip_stars(text)
+  end
+
+  def test_strip_stars_encoding
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    text = <<-TEXT
+/*
+ * * we don't worry too much.
+ *
+ * The comments associated with
+ */
+    TEXT
+
+    text.force_encoding Encoding::CP852
+
+    expected = <<-EXPECTED
+
+   * we don't worry too much.
+
+   The comments associated with
+    EXPECTED
+
+    result = strip_stars text
+
+    assert_equal expected, result
+    assert_equal Encoding::CP852, result.encoding
+  end
+
+  def test_strip_stars_encoding2
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    text = <<-TEXT
+/*
+ * * we don't worry too much.
+ *
+ * The comments associated with
+ */
+    TEXT
+
+    text.force_encoding Encoding::BINARY
+
+    expected = <<-EXPECTED
+
+   * we don't worry too much.
+
+   The comments associated with
+    EXPECTED
+
+    result = strip_stars text
+
+    assert_equal expected, result
+    assert_equal Encoding::BINARY, result.encoding
   end
 
   def test_to_html_apostrophe

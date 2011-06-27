@@ -674,6 +674,21 @@ class TestString < Test::Unit::TestCase
     assert_raise(ArgumentError) { "foo".gsub }
   end
 
+  def test_gsub_encoding
+    a = S("hello world")
+    a.force_encoding Encoding::UTF_8
+
+    b = S("hi")
+    b.force_encoding Encoding::US_ASCII
+
+    assert_equal Encoding::UTF_8, a.gsub(/hello/, b).encoding
+
+    c = S("everybody")
+    c.force_encoding Encoding::US_ASCII
+
+    assert_equal Encoding::UTF_8, a.gsub(/world/, c).encoding
+  end
+
   def test_gsub!
     a = S("hello")
     b = a.dup
@@ -1678,14 +1693,6 @@ class TestString < Test::Unit::TestCase
     }
   end
 
-  def test_tainted_str_new
-    a = []
-    a << a
-    s = a.inspect
-    assert(s.tainted?)
-    assert_equal("[[...]]", s)
-  end
-
   class S2 < String
   end
   def test_str_new4
@@ -1936,5 +1943,37 @@ class TestString < Test::Unit::TestCase
     a.prepend(b)
     assert_equal(S("hello world"), a)
     assert_equal(S("hello "), b)
+  end
+
+  def u(str)
+    str.force_encoding(Encoding::UTF_8)
+  end
+
+  def test_byteslice
+    assert_equal("h", "hello".byteslice(0))
+    assert_equal(nil, "hello".byteslice(5))
+    assert_equal("o", "hello".byteslice(-1))
+    assert_equal(nil, "hello".byteslice(-6))
+
+    assert_equal("", "hello".byteslice(0, 0))
+    assert_equal("hello", "hello".byteslice(0, 6))
+    assert_equal("hello", "hello".byteslice(0, 6))
+    assert_equal("", "hello".byteslice(5, 1))
+    assert_equal("o", "hello".byteslice(-1, 6))
+    assert_equal(nil, "hello".byteslice(-6, 1))
+    assert_equal(nil, "hello".byteslice(0, -1))
+
+    assert_equal("h", "hello".byteslice(0..0))
+    assert_equal("", "hello".byteslice(5..0))
+    assert_equal("o", "hello".byteslice(4..5))
+    assert_equal(nil, "hello".byteslice(6..0))
+    assert_equal("", "hello".byteslice(-1..0))
+    assert_equal("llo", "hello".byteslice(-3..5))
+
+    assert_equal(u("\x81"), "\u3042".byteslice(1))
+    assert_equal(u("\x81\x82"), "\u3042".byteslice(1, 2))
+    assert_equal(u("\x81\x82"), "\u3042".byteslice(1..2))
+
+    assert_equal(u("\x82")+("\u3042"*9), ("\u3042"*10).byteslice(2, 28))
   end
 end

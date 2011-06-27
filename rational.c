@@ -1,11 +1,12 @@
 /*
-  rational.c: Coded by Tadayoshi Funaba 2008-2010
+  rational.c: Coded by Tadayoshi Funaba 2008-2011
 
   This implementation is based on Keiju Ishitsuka's Rational library
   which is written in ruby.
 */
 
 #include "ruby.h"
+#include "internal.h"
 #include <math.h>
 #include <float.h>
 
@@ -136,8 +137,22 @@ fun1(floor)
 fun1(inspect)
 fun1(integer_p)
 fun1(negate)
-fun1(to_f)
-fun1(to_i)
+
+inline static VALUE
+f_to_i(VALUE x)
+{
+    if (TYPE(x) == T_STRING)
+	return rb_str_to_inum(x, 10, 0);
+    return rb_funcall(x, id_to_i, 0);
+}
+inline static VALUE
+f_to_f(VALUE x)
+{
+    if (TYPE(x) == T_STRING)
+	return DBL2NUM(rb_str_to_dbl(x, 0));
+    return rb_funcall(x, id_to_f, 0);
+}
+
 fun1(to_s)
 fun1(truncate)
 
@@ -152,6 +167,8 @@ f_eqeq_p(VALUE x, VALUE y)
 fun2(expt)
 fun2(fdiv)
 fun2(idiv)
+
+#define f_expt10(x) f_expt(INT2FIX(10), x)
 
 inline static VALUE
 f_negative_p(VALUE x)
@@ -588,7 +605,7 @@ inline static VALUE
 f_imul(long a, long b)
 {
     VALUE r;
-    long c;
+    volatile long c;
 
     if (a == 0 || b == 0)
 	return ZERO;
@@ -1208,7 +1225,7 @@ f_round_common(int argc, VALUE *argv, VALUE self, VALUE (*func)(VALUE))
     if (!k_integer_p(n))
 	rb_raise(rb_eTypeError, "not an integer");
 
-    b = f_expt(INT2FIX(10), n);
+    b = f_expt10(n);
     s = f_mul(self, b);
 
     s = (*func)(s);
@@ -2002,12 +2019,6 @@ make_patterns(void)
 #define id_match rb_intern("match")
 #define f_match(x,y) rb_funcall((x), id_match, 1, (y))
 
-#define id_aref rb_intern("[]")
-#define f_aref(x,y) rb_funcall((x), id_aref, 1, (y))
-
-#define id_post_match rb_intern("post_match")
-#define f_post_match(x) rb_funcall((x), id_post_match, 0)
-
 #define id_split rb_intern("split")
 #define f_split(x,y) rb_funcall((x), id_split, 1, (y))
 
@@ -2027,33 +2038,45 @@ string_to_r_internal(VALUE self)
 
     if (!NIL_P(m)) {
 	VALUE v, ifp, exp, ip, fp;
-	VALUE si = f_aref(m, INT2FIX(1));
-	VALUE nu = f_aref(m, INT2FIX(2));
-	VALUE de = f_aref(m, INT2FIX(3));
-	VALUE re = f_post_match(m);
+	VALUE si = rb_reg_nth_match(1, m);
+	VALUE nu = rb_reg_nth_match(2, m);
+	VALUE de = rb_reg_nth_match(3, m);
+	VALUE re = rb_reg_match_post(m);
 
 	{
 	    VALUE a;
 
-	    a = f_split(nu, an_e_pat);
-	    ifp = RARRAY_PTR(a)[0];
-	    if (RARRAY_LEN(a) != 2)
+	    if (!strpbrk(RSTRING_PTR(nu), "eE")) {
+		ifp = nu; /* not a copy */
 		exp = Qnil;
-	    else
-		exp = RARRAY_PTR(a)[1];
+	    }
+	    else {
+		a = f_split(nu, an_e_pat);
+		ifp = RARRAY_PTR(a)[0];
+		if (RARRAY_LEN(a) != 2)
+		    exp = Qnil;
+		else
+		    exp = RARRAY_PTR(a)[1];
+	    }
 
-	    a = f_split(ifp, a_dot_pat);
-	    ip = RARRAY_PTR(a)[0];
-	    if (RARRAY_LEN(a) != 2)
+	    if (!strchr(RSTRING_PTR(ifp), '.')) {
+		ip = ifp; /* not a copy */
 		fp = Qnil;
-	    else
-		fp = RARRAY_PTR(a)[1];
+	    }
+	    else {
+		a = f_split(ifp, a_dot_pat);
+		ip = RARRAY_PTR(a)[0];
+		if (RARRAY_LEN(a) != 2)
+		    fp = Qnil;
+		else
+		    fp = RARRAY_PTR(a)[1];
+	    }
 	}
 
 	v = rb_rational_new1(f_to_i(ip));
 
 	if (!NIL_P(fp)) {
-	    char *p = StringValuePtr(fp);
+	    char *p = RSTRING_PTR(fp);
 	    long count = 0;
 	    VALUE l;
 
@@ -2062,16 +2085,15 @@ string_to_r_internal(VALUE self)
 		    count++;
 		p++;
 	    }
-
-	    l = f_expt(INT2FIX(10), LONG2NUM(count));
+	    l = f_expt10(LONG2NUM(count));
 	    v = f_mul(v, l);
 	    v = f_add(v, f_to_i(fp));
 	    v = f_div(v, l);
 	}
-	if (!NIL_P(si) && *StringValuePtr(si) == '-')
+	if (!NIL_P(si) && *RSTRING_PTR(si) == '-')
 	    v = f_negate(v);
 	if (!NIL_P(exp))
-	    v = f_mul(v, f_expt(INT2FIX(10), f_to_i(exp)));
+	    v = f_mul(v, f_expt10(f_to_i(exp)));
 #if 0
 	if (!NIL_P(de) && (!NIL_P(fp) || !NIL_P(exp)))
 	    return rb_assoc_new(v, rb_usascii_str_new2("dummy"));
@@ -2125,7 +2147,7 @@ string_to_r_strict(VALUE self)
 static VALUE
 string_to_r(VALUE self)
 {
-    VALUE s, a, backref;
+    VALUE s, a, a1, backref;
 
     backref = rb_backref_get();
     rb_match_busy(backref);
@@ -2135,8 +2157,12 @@ string_to_r(VALUE self)
 
     rb_backref_set(backref);
 
-    if (!NIL_P(RARRAY_PTR(a)[0]))
-	return RARRAY_PTR(a)[0];
+    a1 = RARRAY_PTR(a)[0];
+    if (!NIL_P(a1)) {
+	if (TYPE(a1) == T_FLOAT)
+	    rb_raise(rb_eFloatDomainError, "Infinity");
+	return a1;
+    }
     return rb_rational_new1(INT2FIX(0));
 }
 

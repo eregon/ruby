@@ -20,6 +20,7 @@
 #include <math.h>
 #include <float.h>
 #include "constant.h"
+#include "internal.h"
 
 VALUE rb_cBasicObject;
 VALUE rb_mKernel;
@@ -97,6 +98,16 @@ rb_obj_equal(VALUE obj1, VALUE obj2)
     return Qfalse;
 }
 
+/*
+ * Generates a <code>Fixnum</code> hash value for this object.
+ * This function must have the property that a.eql?(b) implies
+ * a.hash <code>==</code> b.hash.
+ * The hash value is used by class <code>Hash</code>.
+ * Any hash value that exceeds the capacity of a <code>Fixnum</code> will be
+ * truncated before being used.
+ *
+ *      "waffle".hash #=> -910576647
+ */
 VALUE
 rb_obj_hash(VALUE obj)
 {
@@ -415,8 +426,6 @@ inspect_obj(VALUE obj, VALUE str, int recur)
 static VALUE
 rb_obj_inspect(VALUE obj)
 {
-    extern int rb_obj_basic_to_s_p(VALUE);
-
     if (TYPE(obj) == T_OBJECT && rb_obj_basic_to_s_p(obj)) {
         int has_ivar = 0;
         VALUE *ptr = ROBJECT_IVPTR(obj);
@@ -567,6 +576,54 @@ rb_obj_tap(VALUE obj)
  *
  *    New subclass: Bar
  *    New subclass: Baz
+ */
+
+/* Document-method: method_added
+ *
+ * call-seq:
+ *   method_added(method_name)
+ *
+ * Invoked as a callback whenever an instance method is added to the
+ * receiver.
+ *
+ *   module Chatty
+ *     def self.method_added(method_name)
+ *       puts "Adding #{method_name.inspect}"
+ *     end
+ *     def self.some_class_method() end
+ *     def some_instance_method() end
+ *   end
+ *
+ * produces:
+ *
+ *   Adding :some_instance_method
+ *
+ */
+
+/* Document-method: method_removed
+ *
+ * call-seq:
+ *   method_removed(method_name)
+ *
+ * Invoked as a callback whenever an instance method is removed from the
+ * receiver.
+ *
+ *   module Chatty
+ *     def self.method_removed(method_name)
+ *       puts "Removing #{method_name.inspect}"
+ *     end
+ *     def self.some_class_method() end
+ *     def some_instance_method() end
+ *     class << self
+ *       remove_method :some_class_method
+ *     end
+ *     remove_method :some_instance_method
+ *   end
+ *
+ * produces:
+ *
+ *   Removing :some_instance_method
+ *
  */
 
 /*
@@ -1440,8 +1497,6 @@ rb_class_s_alloc(VALUE klass)
 static VALUE
 rb_mod_initialize(VALUE module)
 {
-    extern VALUE rb_mod_module_exec(int argc, VALUE *argv, VALUE mod);
-
     if (rb_block_given_p()) {
 	rb_mod_module_exec(1, &module, module);
     }
@@ -1591,7 +1646,7 @@ rb_class_new_instance(int argc, VALUE *argv, VALUE klass)
  *
  */
 
-static VALUE
+VALUE
 rb_class_superclass(VALUE klass)
 {
     VALUE super = RCLASS_SUPER(klass);
@@ -1607,6 +1662,12 @@ rb_class_superclass(VALUE klass)
 	return Qnil;
     }
     return super;
+}
+
+VALUE
+rb_class_get_superclass(VALUE klass)
+{
+    return RCLASS_SUPER(klass);
 }
 
 /*
@@ -1690,12 +1751,14 @@ rb_mod_attr_accessor(int argc, VALUE *argv, VALUE klass)
  *  call-seq:
  *     mod.const_get(sym, inherit=true)    -> obj
  *
- *  Returns the value of the named constant in <i>mod</i>.
+ *  Checks for a constant with the given name in <i>mod</i>
+ *  If +inherit+ is set, the lookup will also search
+ *  the ancestors (and +Object+ if <i>mod</i> is a +Module+.)
+ *
+ *  The value of the constant is returned if a definition is found,
+ *  otherwise a +NameError+ is raised.
  *
  *     Math.const_get(:PI)   #=> 3.14159265358979
- *
- *  If the constant is not defined or is defined by the ancestors and
- *  +inherit+ is false, +NameError+ will be raised.
  */
 
 static VALUE
@@ -1746,12 +1809,15 @@ rb_mod_const_set(VALUE mod, VALUE name, VALUE value)
  *  call-seq:
  *     mod.const_defined?(sym, inherit=true)   -> true or false
  *
- *  Returns <code>true</code> if a constant with the given name is
- *  defined by <i>mod</i>, or its ancestors if +inherit+ is not false.
+ *  Checks for a constant with the given name in <i>mod</i>
+ *  If +inherit+ is set, the lookup will also search
+ *  the ancestors (and +Object+ if <i>mod</i> is a +Module+.)
+ *
+ *  Returns whether or not a definition is found:
  *
  *     Math.const_defined? "PI"   #=> true
- *     IO.const_defined? "SYNC"   #=> true
- *     IO.const_defined? "SYNC", false   #=> false
+ *     IO.const_defined? :SYNC   #=> true
+ *     IO.const_defined? :SYNC, false   #=> false
  */
 
 static VALUE
@@ -1773,11 +1839,6 @@ rb_mod_const_defined(int argc, VALUE *argv, VALUE mod)
     }
     return RTEST(recur) ? rb_const_defined(mod, id) : rb_const_defined_at(mod, id);
 }
-
-VALUE rb_obj_methods(int argc, VALUE *argv, VALUE obj);
-VALUE rb_obj_protected_methods(int argc, VALUE *argv, VALUE obj);
-VALUE rb_obj_private_methods(int argc, VALUE *argv, VALUE obj);
-VALUE rb_obj_public_methods(int argc, VALUE *argv, VALUE obj);
 
 /*
  *  call-seq:
@@ -2246,7 +2307,7 @@ rb_str_to_dbl(VALUE str, int badcheck)
     char *s;
     long len;
     double ret;
-    VALUE tmp = Qnil;
+    VALUE v = 0;
 
     StringValue(str);
     s = RSTRING_PTR(str);
@@ -2256,18 +2317,15 @@ rb_str_to_dbl(VALUE str, int badcheck)
 	    rb_raise(rb_eArgError, "string for Float contains null byte");
 	}
 	if (s[len]) {		/* no sentinel somehow */
-	    char *p;
-
-	    tmp = rb_str_tmp_new(len);
-	    p = RSTRING_PTR(tmp);
+	    char *p =  ALLOCV(v, len);
 	    MEMCPY(p, s, char, len);
 	    p[len] = '\0';
 	    s = p;
 	}
     }
     ret = rb_cstr_to_dbl(s, badcheck);
-    if (tmp != Qnil)
-	rb_str_resize(tmp, 0);
+    if (v)
+	ALLOCV_END(v);
     return ret;
 }
 
@@ -2363,7 +2421,10 @@ rb_num2dbl(VALUE val)
 VALUE
 rb_String(VALUE val)
 {
-    return rb_convert_type(val, T_STRING, "String", "to_s");
+    VALUE tmp = rb_check_string_type(val);
+    if (NIL_P(tmp))
+	tmp = rb_convert_type(val, T_STRING, "String", "to_s");
+    return tmp;
 }
 
 
@@ -2492,32 +2553,40 @@ rb_f_array(VALUE obj, VALUE arg)
  * \ingroup class
  */
 
-/*
+/*  Document-class: BasicObject
  *
- *  <code>BasicObject</code> is the parent class of all classes in Ruby.
- *  It's an explicit blank class.  <code>Object</code>, the root of Ruby's
- *  class hierarchy is a direct subclass of <code>BasicObject</code>.  Its
- *  methods are therefore available to all objects unless explicitly
- *  overridden.
+ *  BasicObject is the parent class of all classes in Ruby.  It's an explicit
+ *  blank class.
+ */
+
+/*  Document-class: Object
  *
- *  <code>Object</code> mixes in the <code>Kernel</code> module, making
- *  the built-in kernel functions globally accessible. Although the
- *  instance methods of <code>Object</code> are defined by the
- *  <code>Kernel</code> module, we have chosen to document them here for
- *  clarity.
+ *  Object is the root of Ruby's class hierarchy.  Its methods are available
+ *  to all classes unless explicitly overridden.
+ *
+ *  Object mixes in the Kernel module, making the built-in kernel functions
+ *  globally accessible. Although the instance methods of Object are defined
+ *  by the Kernel module, we have chosen to document them here for clarity.
  *
  *  In the descriptions of Object's methods, the parameter <i>symbol</i> refers
- *  to a symbol, which is either a quoted string or a
- *  <code>Symbol</code> (such as <code>:name</code>).
+ *  to a symbol, which is either a quoted string or a Symbol (such as
+ *  <code>:name</code>).
  */
 
 void
 Init_Object(void)
 {
-    extern void Init_class_hierarchy(void);
     int i;
 
     Init_class_hierarchy();
+
+#if 0
+    // teach RDoc about these classes
+    rb_cBasicObject = rb_define_class("BasicObject", Qnil);
+    rb_cObject = rb_define_class("Object", rb_cBasicObject);
+    rb_cModule = rb_define_class("Module", rb_cObject);
+    rb_cClass =  rb_define_class("Class",  rb_cModule);
+#endif
 
 #undef rb_intern
 #define rb_intern(str) rb_intern_const(str)

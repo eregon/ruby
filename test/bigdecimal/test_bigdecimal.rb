@@ -29,12 +29,34 @@ class TestBigDecimal < Test::Unit::TestCase
     assert_raise(ArgumentError) { BigDecimal("1", -1) }
   end
 
+  def test_global_new_with_integer
+    assert_equal(BigDecimal("1"), BigDecimal(1))
+    assert_equal(BigDecimal("-1"), BigDecimal(-1))
+    assert_equal(BigDecimal((2**100).to_s), BigDecimal(2**100))
+    assert_equal(BigDecimal((-2**100).to_s), BigDecimal(-2**100))
+  end
+
+  def test_global_new_with_rational
+    assert_equal(BigDecimal("0.333333333333333333333"), BigDecimal(1.quo(3), 21))
+    assert_equal(BigDecimal("-0.333333333333333333333"), BigDecimal(-1.quo(3), 21))
+    assert_raise(ArgumentError) { BigDecimal(1.quo(3)) }
+  end
+
+  def test_global_new_with_float
+    assert_equal(BigDecimal("0.1235"), BigDecimal(0.1234567, 4))
+    assert_equal(BigDecimal("-0.1235"), BigDecimal(-0.1234567, 4))
+    assert_raise(ArgumentError) { BigDecimal(0.1) }
+    assert_raise(ArgumentError) { BigDecimal(0.1, Float::DIG + 2) }
+    assert_nothing_raised { BigDecimal(0.1, Float::DIG + 1) }
+  end
+
   def test_new
     assert_equal(1, BigDecimal.new("1"))
     assert_equal(1, BigDecimal.new("1", 1))
     assert_equal(1, BigDecimal.new(" 1 "))
     assert_equal(111, BigDecimal.new("1_1_1_"))
     assert_equal(0, BigDecimal.new("_1_1_1"))
+    assert_equal(10**(-1), BigDecimal.new("1E-1"), '#4825')
 
     BigDecimal.mode(BigDecimal::EXCEPTION_OVERFLOW, false)
     BigDecimal.mode(BigDecimal::EXCEPTION_NaN, false)
@@ -42,6 +64,27 @@ class TestBigDecimal < Test::Unit::TestCase
     assert_equal(-1, BigDecimal.new("-Infinity").infinite?)
     assert_equal(true, BigDecimal.new("NaN").nan?)
     assert_equal( 1, BigDecimal.new("1E1111111111111111111").infinite?)
+  end
+
+  def test_new_with_integer
+    assert_equal(BigDecimal("1"), BigDecimal.new(1))
+    assert_equal(BigDecimal("-1"), BigDecimal.new(-1))
+    assert_equal(BigDecimal((2**100).to_s), BigDecimal.new(2**100))
+    assert_equal(BigDecimal((-2**100).to_s), BigDecimal.new(-2**100))
+  end
+
+  def test_new_with_rational
+    assert_equal(BigDecimal("0.333333333333333333333"), BigDecimal.new(1.quo(3), 21))
+    assert_equal(BigDecimal("-0.333333333333333333333"), BigDecimal.new(-1.quo(3), 21))
+    assert_raise(ArgumentError) { BigDecimal.new(1.quo(3)) }
+  end
+
+  def test_new_with_float
+    assert_equal(BigDecimal("0.1235"), BigDecimal(0.1234567, 4))
+    assert_equal(BigDecimal("-0.1235"), BigDecimal(-0.1234567, 4))
+    assert_raise(ArgumentError) { BigDecimal.new(0.1) }
+    assert_raise(ArgumentError) { BigDecimal.new(0.1, Float::DIG + 2) }
+    assert_nothing_raised { BigDecimal.new(0.1, Float::DIG + 1) }
   end
 
   def _test_mode(type)
@@ -309,6 +352,9 @@ class TestBigDecimal < Test::Unit::TestCase
     inf = BigDecimal.new("Infinity")
     assert_operator(inf, :>, 1)
     assert_operator(1, :<, inf)
+
+    assert_operator(BigDecimal("1E-1"), :==, 10**(-1), '#4825')
+    assert_equal(0, BigDecimal("1E-1") <=> 10**(-1), '#4825')
   end
 
   def test_cmp_nan
@@ -459,6 +505,12 @@ class TestBigDecimal < Test::Unit::TestCase
     assert_instance_of(Float, a)
     assert_instance_of(Float, b)
     assert_equal(2, 1 + BigDecimal.new("1"), '[ruby-core:25697]')
+
+    a, b = BigDecimal("1").coerce(1.quo(10))
+    assert_equal(BigDecimal("0.1"), a, '[ruby-core:34318]')
+
+    a, b = BigDecimal("0.11111").coerce(1.quo(3))
+    assert_equal(BigDecimal("0." + "3"*a.precs[0]), a)
   end
 
   def test_uplus
@@ -715,7 +767,8 @@ class TestBigDecimal < Test::Unit::TestCase
   def test_power
     x = BigDecimal.new("3")
     assert_equal(81, x ** 4)
-    assert_equal(1.0/81, x ** -4)
+    assert_equal(1.0/81, (x ** -4).to_f)
+    assert_equal(1.quo(81), x ** -4)
     assert_equal(1, x ** 0)
     assert_raise(TypeError) { x ** x }
     assert_equal(0, BigDecimal.new("0") ** 4)
@@ -842,5 +895,142 @@ class TestBigDecimal < Test::Unit::TestCase
 
   def test_NAN
     assert(BigDecimal::NAN.nan?, "BigDecimal::NAN is not NaN")
+  end
+
+  def test_exp_with_zerp_precision
+    assert_raise(ArgumentError) do
+      BigMath.exp(1, 0)
+    end
+  end
+
+  def test_exp_with_negative_precision
+    assert_raise(ArgumentError) do
+      BigMath.exp(1, -42)
+    end
+  end
+
+  def test_exp_with_complex
+    assert_raise(ArgumentError) do
+      BigMath.exp(Complex(1, 2), 20)
+    end
+  end
+
+  def test_exp_with_negative_infinite
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_INFINITY, false)
+      assert_equal(0, BigMath.exp(-BigDecimal::INFINITY, 20))
+    end
+  end
+
+  def test_exp_with_positive_infinite
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_INFINITY, false)
+      assert(BigMath.exp(BigDecimal::INFINITY, 20) > 0)
+      assert(BigMath.exp(BigDecimal::INFINITY, 20).infinite?)
+    end
+  end
+
+  def test_exp_with_nan
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_NaN, false)
+      assert(BigMath.exp(BigDecimal::NAN, 20).nan?)
+    end
+  end
+
+  def test_exp_with_1
+    assert_in_epsilon(Math::E, BigMath.exp(1, 20))
+  end
+
+  def test_BigMath_exp
+    n = 20
+    assert_in_epsilon(Math.exp(n), BigMath.exp(BigDecimal("20"), n))
+    assert_in_epsilon(Math.exp(40), BigMath.exp(BigDecimal("40"), n))
+    assert_in_epsilon(Math.exp(-n), BigMath.exp(BigDecimal("-20"), n))
+    assert_in_epsilon(Math.exp(-40), BigMath.exp(BigDecimal("-40"), n))
+  end
+
+  def test_BigMath_log_with_nil
+    assert_raise(ArgumentError) do
+      BigMath.log(nil, 20)
+    end
+  end
+
+  def test_BigMath_log_with_nil_precision
+    assert_raise(ArgumentError) do
+      BigMath.log(1, nil)
+    end
+  end
+
+  def test_BigMath_log_with_complex
+    assert_raise(Math::DomainError) do
+      BigMath.log(Complex(1, 2), 20)
+    end
+  end
+
+  def test_BigMath_log_with_zerp_precision
+    assert_raise(ArgumentError) do
+      BigMath.log(1, 0)
+    end
+  end
+
+  def test_BigMath_log_with_negative_precision
+    assert_raise(ArgumentError) do
+      BigMath.log(1, -42)
+    end
+  end
+
+  def test_BigMath_log_with_negative_infinite
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_INFINITY, false)
+      assert_raise(Math::DomainError) do
+        BigMath.log(-BigDecimal::INFINITY, 20)
+      end
+    end
+  end
+
+  def test_BigMath_log_with_positive_infinite
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_INFINITY, false)
+      assert(BigMath.log(BigDecimal::INFINITY, 20) > 0)
+      assert(BigMath.log(BigDecimal::INFINITY, 20).infinite?)
+    end
+  end
+
+  def test_BigMath_log_with_nan
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_NaN, false)
+      assert(BigMath.log(BigDecimal::NAN, 20).nan?)
+    end
+  end
+
+  def test_BigMath_log_with_1
+    assert_in_delta(0.0, BigMath.log(1, 20))
+    assert_in_delta(0.0, BigMath.log(1.0, 20))
+    assert_in_delta(0.0, BigMath.log(BigDecimal(1), 20))
+  end
+
+  def test_BigMath_log_with_exp_1
+    assert_in_delta(1.0, BigMath.log(BigMath.exp(1, 20), 20))
+  end
+
+  def test_BigMath_log_with_2
+    assert_in_delta(Math.log(2), BigMath.log(2, 20))
+    assert_in_delta(Math.log(2), BigMath.log(2.0, 20))
+    assert_in_delta(Math.log(2), BigMath.log(BigDecimal(2), 20))
+  end
+
+  def test_BigMath_log_with_square_of_exp_2
+    assert_in_delta(2, BigMath.log(BigMath.exp(1, 20)**2, 20))
+  end
+
+  def test_BigMath_log_with_42
+    assert_in_delta(Math.log(42), BigMath.log(42, 20))
+    assert_in_delta(Math.log(42), BigMath.log(42.0, 20))
+    assert_in_delta(Math.log(42), BigMath.log(BigDecimal(42), 20))
+  end
+
+  def test_BigMath_log_with_reciprocal_of_42
+    assert_in_delta(Math.log(1e-42), BigMath.log(1e-42, 20))
+    assert_in_delta(Math.log(1e-42), BigMath.log(BigDecimal("1e-42"), 20))
   end
 end

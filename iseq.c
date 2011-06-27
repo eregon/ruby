@@ -10,6 +10,7 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "internal.h"
 
 /* #define RUBY_MARK_FREE_DEBUG 1 */
 #include "gc.h"
@@ -217,8 +218,6 @@ set_relation(rb_iseq_t *iseq, const VALUE parent)
     }
 }
 
-VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
-
 static VALUE
 prepare_iseq_build(rb_iseq_t *iseq,
 		   VALUE name, VALUE filename, VALUE filepath, VALUE line_no,
@@ -250,6 +249,7 @@ prepare_iseq_build(rb_iseq_t *iseq,
 
     iseq->compile_data = ALLOC(struct iseq_compile_data);
     MEMZERO(iseq->compile_data, struct iseq_compile_data, 1);
+    iseq->compile_data->err_info = Qnil;
     iseq->compile_data->mark_ary = rb_ary_tmp_new(3);
 
     iseq->compile_data->storage_head = iseq->compile_data->storage_current =
@@ -271,7 +271,6 @@ prepare_iseq_build(rb_iseq_t *iseq,
 
     iseq->coverage = Qfalse;
     if (!GET_THREAD()->parse_in_eval) {
-	extern VALUE rb_get_coverages(void);
 	VALUE coverages = rb_get_coverages();
 	if (RTEST(coverages)) {
 	    iseq->coverage = rb_hash_lookup(coverages, filename);
@@ -1024,7 +1023,6 @@ iseq_s_disasm(VALUE klass, VALUE body)
 {
     VALUE ret = Qnil;
     rb_iseq_t *iseq;
-    extern rb_iseq_t *rb_method_get_iseq(VALUE body);
 
     rb_secure(1);
 

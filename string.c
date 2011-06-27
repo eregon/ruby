@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/re.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include <assert.h>
 
 #define BEG(no) (regs->beg[(no)])
@@ -44,6 +45,8 @@
 #undef rb_str_buf_new2
 #undef rb_str_buf_cat2
 #undef rb_str_cat2
+
+static VALUE rb_str_clear(VALUE str);
 
 VALUE rb_cString;
 VALUE rb_cSymbol;
@@ -765,6 +768,22 @@ rb_str_tmp_new(long len)
     return str_new(0, 0, len);
 }
 
+void *
+rb_alloc_tmp_buffer(volatile VALUE *store, long len)
+{
+    VALUE s = rb_str_tmp_new(len);
+    *store = s;
+    return RSTRING_PTR(s);
+}
+
+void
+rb_free_tmp_buffer(volatile VALUE *store)
+{
+    VALUE s = *store;
+    *store = 0;
+    if (s) rb_str_clear(s);
+}
+
 void
 rb_str_free(VALUE str)
 {
@@ -1020,13 +1039,30 @@ rb_enc_strlen_cr(const char *p, const char *e, rb_encoding *enc, int *cr)
 
 #ifdef NONASCII_MASK
 #define is_utf8_lead_byte(c) (((c)&0xC0) != 0x80)
+
+/*
+ * UTF-8 leading bytes have either 0xxxxxxx or 11xxxxxx
+ * bit represention. (see http://en.wikipedia.org/wiki/UTF-8)
+ * Therefore, following pseudo code can detect UTF-8 leading byte.
+ *
+ * if (!(byte & 0x80))
+ *   byte |= 0x40;          // turn on bit6
+ * return ((byte>>6) & 1);  // bit6 represent it's leading byte or not.
+ *
+ * This function calculate every bytes in the argument word `s'
+ * using the above logic concurrently. and gather every bytes result.
+ */
 static inline VALUE
 count_utf8_lead_bytes_with_word(const VALUE *s)
 {
     VALUE d = *s;
+
+    /* Transform into bit0 represent UTF-8 leading or not. */
     d |= ~(d>>1);
     d >>= 6;
     d &= NONASCII_MASK >> 7;
+
+    /* Gather every bytes. */
     d += (d>>8);
     d += (d>>16);
 #if SIZEOF_VALUE == 8
@@ -1115,7 +1151,7 @@ rb_str_length(VALUE str)
 static VALUE
 rb_str_bytesize(VALUE str)
 {
-    return INT2NUM(RSTRING_LEN(str));
+    return LONG2NUM(RSTRING_LEN(str));
 }
 
 /*
@@ -1513,7 +1549,7 @@ static char *
 str_utf8_nth(const char *p, const char *e, long *nthp)
 {
     long nth = *nthp;
-    if ((int)SIZEOF_VALUE < e - p && (int)SIZEOF_VALUE * 2 < nth) {
+    if ((int)SIZEOF_VALUE * 2 < e - p && (int)SIZEOF_VALUE * 2 < nth) {
 	const VALUE *s, *t;
 	const VALUE lowbits = sizeof(VALUE) - 1;
 	s = (const VALUE*)(~lowbits & ((VALUE)p + lowbits));
@@ -1864,7 +1900,6 @@ rb_enc_cr_str_buf_cat(VALUE str, const char *ptr, long len,
     int str_encindex = ENCODING_GET(str);
     int res_encindex;
     int str_cr, res_cr;
-    int str_a8 = ENCODING_IS_ASCII8BIT(str);
     int ptr_a8 = ptr_encindex == 0;
 
     str_cr = ENC_CODERANGE(str);
@@ -1895,7 +1930,7 @@ rb_enc_cr_str_buf_cat(VALUE str, const char *ptr, long len,
 	    ptr_cr = coderange_scan(ptr, len, ptr_enc);
 	}
         if (str_cr == ENC_CODERANGE_UNKNOWN) {
-            if (str_a8 || ptr_cr != ENC_CODERANGE_7BIT) {
+            if (ENCODING_IS_ASCII8BIT(str) || ptr_cr != ENC_CODERANGE_7BIT) {
                 str_cr = rb_enc_str_coderange(str);
             }
         }
@@ -1918,7 +1953,7 @@ rb_enc_cr_str_buf_cat(VALUE str, const char *ptr, long len,
     }
     else if (str_cr == ENC_CODERANGE_7BIT) {
         if (ptr_cr == ENC_CODERANGE_7BIT) {
-            res_encindex = !str_a8 ? str_encindex : ptr_encindex;
+            res_encindex = str_encindex;
             res_cr = ENC_CODERANGE_7BIT;
         }
         else {
@@ -2018,8 +2053,6 @@ rb_str_append(VALUE str, VALUE str2)
     }
     return rb_str_buf_append(str, str2);
 }
-
-int rb_num_to_uint(VALUE val, unsigned int *ret);
 
 /*
  *  call-seq:
@@ -3134,7 +3167,8 @@ rb_str_aref(VALUE str, VALUE indx)
  *  characters at offsets given by the range is returned. In all three cases, if
  *  an offset is negative, it is counted from the end of <i>str</i>. Returns
  *  <code>nil</code> if the initial offset falls outside the string, the length
- *  is negative, or the beginning of the range is greater than the end.
+ *  is negative, or the beginning of the range is greater than the end of the
+ *  string.
  *
  *  If a <code>Regexp</code> is supplied, the matching portion of <i>str</i> is
  *  returned. If a numeric or name parameter follows the regular expression, that
@@ -3470,9 +3504,9 @@ rb_str_slice_bang(int argc, VALUE *argv, VALUE str)
 	buf[i] = argv[i];
     }
     str_modify_keep_cr(str);
-    buf[i] = rb_str_new(0,0);
     result = rb_str_aref_m(argc, buf, str);
     if (!NIL_P(result)) {
+	buf[i] = rb_str_new(0,0);
 	rb_str_aset_m(argc+1, buf, str);
     }
     return result;
@@ -3710,6 +3744,8 @@ str_gsub(int argc, VALUE *argv, VALUE str, int bang)
     slen = RSTRING_LEN(str);
     cp = sp;
     str_enc = STR_ENC_GET(str);
+    rb_enc_associate(dest, str_enc);
+    ENC_CODERANGE_SET(dest, rb_enc_asciicompat(str_enc) ? ENC_CODERANGE_7BIT : ENC_CODERANGE_VALID);
 
     do {
 	n++;
@@ -3949,6 +3985,110 @@ rb_str_setbyte(VALUE str, VALUE index, VALUE value)
     RSTRING_PTR(str)[pos] = byte;
 
     return value;
+}
+
+static VALUE
+str_byte_substr(VALUE str, long beg, long len)
+{
+    char *p, *s = RSTRING_PTR(str);
+    long n = RSTRING_LEN(str);
+    VALUE str2;
+
+    if (beg > n || len < 0) return Qnil;
+    if (beg < 0) {
+	beg += n;
+	if (beg < 0) return Qnil;
+    }
+    if (beg + len > n)
+	len = n - beg;
+    if (len <= 0) {
+	len = 0;
+	p = 0;
+    }
+    else
+	p = s + beg;
+
+    if (len > RSTRING_EMBED_LEN_MAX && beg + len == n) {
+	str2 = rb_str_new4(str);
+	str2 = str_new3(rb_obj_class(str2), str2);
+	RSTRING(str2)->as.heap.ptr += RSTRING(str2)->as.heap.len - len;
+	RSTRING(str2)->as.heap.len = len;
+    }
+    else {
+	str2 = rb_str_new5(str, p, len);
+	rb_enc_cr_str_copy_for_substr(str2, str);
+	OBJ_INFECT(str2, str);
+    }
+
+    return str2;
+}
+
+static VALUE
+str_byte_aref(VALUE str, VALUE indx)
+{
+    long idx;
+    switch (TYPE(indx)) {
+      case T_FIXNUM:
+	idx = FIX2LONG(indx);
+
+      num_index:
+	str = str_byte_substr(str, idx, 1);
+	if (NIL_P(str) || RSTRING_LEN(str) == 0) return Qnil;
+	return str;
+
+      default:
+	/* check if indx is Range */
+	{
+	    long beg, len = RSTRING_LEN(str);
+
+	    switch (rb_range_beg_len(indx, &beg, &len, len, 0)) {
+	      case Qfalse:
+		break;
+	      case Qnil:
+		return Qnil;
+	      default:
+		return str_byte_substr(str, beg, len);
+	    }
+	}
+	idx = NUM2LONG(indx);
+	goto num_index;
+    }
+    return Qnil;		/* not reached */
+}
+
+/*
+ *  call-seq:
+ *     str.byteslice(fixnum)           -> new_str or nil
+ *     str.byteslice(fixnum, fixnum)   -> new_str or nil
+ *     str.byteslice(range)            -> new_str or nil
+ *
+ *  Byte Reference---If passed a single <code>Fixnum</code>, returns a
+ *  substring of one byte at that position. If passed two <code>Fixnum</code>
+ *  objects, returns a substring starting at the offset given by the first, and
+ *  a length given by the second. If given a <code>Range</code>, a substring containing
+ *  bytes at offsets given by the range is returned. In all three cases, if
+ *  an offset is negative, it is counted from the end of <i>str</i>. Returns
+ *  <code>nil</code> if the initial offset falls outside the string, the length
+ *  is negative, or the beginning of the range is greater than the end.
+ *  The encoding of the resulted string keeps original encoding.
+ *
+ *     "hello".byteslice(1)     #=> "e"
+ *     "hello".byteslice(-1)    #=> "o"
+ *     "hello".byteslice(1, 2)  #=> "el"
+ *     "\x80\u3042".byteslice(1, 3) #=> "\u3042"
+ *     "\x03\u3042\xff".byteslice(1..3) #=> "\u3942"
+ */
+
+static VALUE
+rb_str_byteslice(int argc, VALUE *argv, VALUE str)
+{
+    if (argc == 2) {
+	return str_byte_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
+    }
+    if (argc != 1) {
+	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
+    }
+    return str_byte_aref(str, argv[0]);
 }
 
 /*
@@ -4836,8 +4976,8 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
     rb_encoding *enc, *e1, *e2;
     struct tr trsrc, trrepl;
     int cflag = 0;
-    unsigned int c, c0;
-    int last = 0, modify = 0, i, l;
+    unsigned int c, c0, last = 0;
+    int modify = 0, i, l;
     char *s, *send;
     VALUE hash = 0;
     int singlebyte = single_byte_optimizable(str);
@@ -5024,7 +5164,7 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 		else c = NUM2INT(tmp);
 	    }
 	    else {
-		c = errc;
+		c = cflag ? last : errc;
 	    }
 	    if (c != errc) {
 		tlen = rb_enc_codelen(c, enc);
@@ -5088,19 +5228,22 @@ rb_str_tr_bang(VALUE str, VALUE src, VALUE repl)
 
 /*
  *  call-seq:
- *     str.tr(from_str, to_str)   -> new_str
+ *     str.tr(from_str, to_str)   => new_str
  *
- *  Returns a copy of <i>str</i> with the characters in <i>from_str</i> replaced
- *  by the corresponding characters in <i>to_str</i>. If <i>to_str</i> is
- *  shorter than <i>from_str</i>, it is padded with its last character. Both
- *  strings may use the c1--c2 notation to denote ranges of characters, and
- *  <i>from_str</i> may start with a <code>^</code>, which denotes all
+ *  Returns a copy of <i>str</i> with the characters in <i>from_str</i> 
+ *  replaced by the corresponding characters in <i>to_str</i>. If 
+ *  <i>to_str</i> is shorter than <i>from_str</i>, it is padded with its last
+ *  character in order to maintain the correspondence.
+ *
+ *     "hello".tr('el', 'ip')      #=> "hippo"
+ *     "hello".tr('aeiou', '*')    #=> "h*ll*"
+ * 
+ *  Both strings may use the c1-c2 notation to denote ranges of characters,
+ *  and <i>from_str</i> may start with a <code>^</code>, which denotes all
  *  characters except those listed.
  *
- *     "hello".tr('aeiou', '*')    #=> "h*ll*"
- *     "hello".tr('^aeiou', '*')   #=> "*e**o"
- *     "hello".tr('el', 'ip')      #=> "hippo"
  *     "hello".tr('a-y', 'b-z')    #=> "ifmmp"
+ *     "hello".tr('^aeiou', '*')   #=> "*e**o"
  */
 
 static VALUE
@@ -5911,7 +6054,8 @@ rb_str_each_line(int argc, VALUE *argv, VALUE str)
 	    p -= n;
 	}
 	if (c == newline &&
-	    (rslen <= 1 || memcmp(RSTRING_PTR(rs), p, rslen) == 0)) {
+	    (rslen <= 1 ||
+	     (pend - p >= rslen && memcmp(RSTRING_PTR(rs), p, rslen) == 0))) {
 	    line = rb_str_new5(str, s, p - s + (rslen ? rslen : n));
 	    OBJ_INFECT(line, str);
 	    rb_enc_cr_str_copy_for_substr(line, str);
@@ -6998,13 +7142,13 @@ rb_str_rpartition(VALUE str, VALUE sep)
  *  call-seq:
  *     str.start_with?([prefix]+)   -> true or false
  *
- *  Returns true if <i>str</i> starts with a prefix given.
+ *  Returns true if <i>str</i> starts with one of the prefixes given.
  *
  *    p "hello".start_with?("hell")               #=> true
  *
- *    # returns true if one of prefix matches.
+ *    # returns true if one of the prefixes matches.
  *    p "hello".start_with?("heaven", "hell")     #=> true
- *    p "hello".start_with?("heaven", "paradice") #=> false
+ *    p "hello".start_with?("heaven", "paradise") #=> false
  *
  *
  *
@@ -7030,7 +7174,7 @@ rb_str_start_with(int argc, VALUE *argv, VALUE str)
  *  call-seq:
  *     str.end_with?([suffix]+)   -> true or false
  *
- *  Returns true if <i>str</i> ends with a suffix given.
+ *  Returns true if <i>str</i> ends with one of the suffixes given.
  */
 
 static VALUE
@@ -7117,6 +7261,57 @@ rb_str_is_ascii_only_p(VALUE str)
     int cr = rb_enc_str_coderange(str);
 
     return cr == ENC_CODERANGE_7BIT ? Qtrue : Qfalse;
+}
+
+/**
+ * Shortens _str_ and adds three dots, an ellipsis, if it is longer
+ * than _len_ characters.
+ *
+ * \param str	the string to ellipsize.
+ * \param len	the maximum string length.
+ * \return	the ellipsized string.
+ * \pre 	_len_ must not be negative.
+ * \post	the length of the returned string in characters is less than or equal to _len_.
+ * \post	If the length of _str_ is less than or equal _len_, returns _str_ itself.
+ * \post	the encoded of returned string is equal to the encoded of _str_.
+ * \post	the class of returned string is equal to the class of _str_.
+ * \note	the length is counted in characters.
+ */
+VALUE
+rb_str_ellipsize(VALUE str, long len)
+{
+    static const char ellipsis[] = "...";
+    const long ellipsislen = sizeof(ellipsis) - 1;
+    rb_encoding *const enc = rb_enc_get(str);
+    const long blen = RSTRING_LEN(str);
+    const char *const p = RSTRING_PTR(str), *e = p + blen;
+    VALUE estr, ret = 0;
+
+    if (len < 0) rb_raise(rb_eIndexError, "negative length %ld", len);
+    if (len * rb_enc_mbminlen(enc) >= blen ||
+	(e = rb_enc_nth(p, e, len, enc)) - p == blen) {
+	ret = str;
+    }
+    else if (len <= ellipsislen ||
+	     !(e = rb_enc_step_back(p, e, e, len = ellipsislen, enc))) {
+	if (rb_enc_asciicompat(enc)) {
+	    ret = rb_str_new_with_class(str, ellipsis, len);
+	    rb_enc_associate(ret, enc);
+	}
+	else {
+	    estr = rb_usascii_str_new(ellipsis, len);
+	    ret = rb_str_encode(estr, rb_enc_from_encoding(enc), 0, Qnil);
+	}
+    }
+    else if (ret = rb_str_subseq(str, 0, e - p), rb_enc_asciicompat(enc)) {
+	rb_str_cat(ret, ellipsis, ellipsislen);
+    }
+    else {
+	estr = rb_str_encode(rb_usascii_str_new(ellipsis, ellipsislen),
+			     rb_enc_from_encoding(enc), 0, Qnil);
+	rb_str_append(ret, estr);
+    }
+    return ret;
 }
 
 /**********************************************************************
@@ -7262,8 +7457,6 @@ sym_to_sym(VALUE sym)
 {
     return sym;
 }
-
-VALUE rb_funcall_passing_block(VALUE recv, ID mid, int argc, const VALUE *argv);
 
 static VALUE
 sym_call(VALUE args, VALUE sym, int argc, VALUE *argv)
@@ -7486,7 +7679,6 @@ ID
 rb_to_id(VALUE name)
 {
     VALUE tmp;
-    ID id;
 
     switch (TYPE(name)) {
       default:
@@ -7504,7 +7696,7 @@ rb_to_id(VALUE name)
       case T_SYMBOL:
 	return SYM2ID(name);
     }
-    return id;
+    return Qnil; /* not reached */
 }
 
 /*
@@ -7562,6 +7754,7 @@ Init_String(void)
     rb_define_method(rb_cString, "chr", rb_str_chr, 0);
     rb_define_method(rb_cString, "getbyte", rb_str_getbyte, 1);
     rb_define_method(rb_cString, "setbyte", rb_str_setbyte, 2);
+    rb_define_method(rb_cString, "byteslice", rb_str_byteslice, -1);
 
     rb_define_method(rb_cString, "to_i", rb_str_to_i, -1);
     rb_define_method(rb_cString, "to_f", rb_str_to_f, 0);

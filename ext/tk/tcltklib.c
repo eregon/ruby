@@ -505,7 +505,7 @@ static int have_rb_thread_waiting_for_value = 0;
 #ifdef RUBY_USE_NATIVE_THREAD
 #define DEFAULT_EVENT_LOOP_MAX        800/*counts*/
 #define DEFAULT_NO_EVENT_TICK          10/*counts*/
-#define DEFAULT_NO_EVENT_WAIT           1/*milliseconds ( 1 -- 999 ) */
+#define DEFAULT_NO_EVENT_WAIT           5/*milliseconds ( 1 -- 999 ) */
 #define WATCHDOG_INTERVAL              10/*milliseconds ( 1 -- 999 ) */
 #define DEFAULT_TIMER_TICK              0/*milliseconds ( 0 -- 999 ) */
 #define NO_THREAD_INTERRUPT_TIME      100/*milliseconds ( 1 -- 999 ) */
@@ -950,7 +950,7 @@ Tcl_AppInitProc Dde_Init, Dde_SafeInit, Registry_Init;
 
 static char *rubytk_kitpath = NULL;
 
-static char rubytkkit_preInitCmd[] = 
+static char rubytkkit_preInitCmd[] =
 "proc tclKitPreInit {} {\n"
     "rename tclKitPreInit {}\n"
     "load {} rubytk_kitpath\n"
@@ -1009,7 +1009,7 @@ static char rubytkkit_preInitCmd[] =
 ;
 
 #if 0
-/* Not use this script. 
+/* Not use this script.
    It's a memo to support an initScript for Tcl interpreters in the future. */
 static const char initScript[] =
 "if {[file isfile [file join $::tcl::kitpath main.tcl]]} {\n"
@@ -1179,8 +1179,8 @@ static int
 call_tclkit_init_script(Tcl_Interp  *interp)
 {
 #if 0
-  /* Currently, do nothing in this function. 
-     It's a memo (quoted from kitInit.c of Tclkit) 
+  /* Currently, do nothing in this function.
+     It's a memo (quoted from kitInit.c of Tclkit)
      to support an initScript for Tcl interpreters in the future. */
   if (Tcl_EvalEx(interp, initScript, -1, TCL_EVAL_GLOBAL) == TCL_OK) {
     const char *encoding = NULL;
@@ -1247,7 +1247,7 @@ setup_rubytkkit()
     /* rbtk_win32_SetHINSTANCE("tcltklib.so"); */
     {
       volatile VALUE basename;
-      basename = rb_funcall(rb_cFile, rb_intern("basename"), 1, 
+      basename = rb_funcall(rb_cFile, rb_intern("basename"), 1,
 			    rb_str_new2(rb_sourcefile()));
       rbtk_win32_SetHINSTANCE(RSTRING_PTR(basename));
     }
@@ -1526,7 +1526,7 @@ call_original_exit(ptr, state)
 	Tcl_Preserve((ClientData)argv); /* XXXXXXXX */
 #endif
 #endif
-        argv[0] = "exit";
+        argv[0] = (char *)"exit";
         /* argv[1] = Tcl_GetString(state_obj); */
         argv[1] = Tcl_GetStringFromObj(state_obj, (int*)NULL);
         argv[2] = (char *)NULL;
@@ -1980,6 +1980,21 @@ lib_num_of_mainwindows(self)
 #endif
 }
 
+void
+rbtk_EventSetupProc(ClientData clientData, int flag)
+{
+    Tcl_Time tcl_time;
+    tcl_time.sec  = 0;
+    tcl_time.usec = 1000L * (long)no_event_tick;
+    Tcl_SetMaxBlockTime(&tcl_time);
+}
+
+void
+rbtk_EventCheckProc(ClientData clientData, int flag)
+{
+    rb_thread_schedule();
+}
+
 
 #ifdef RUBY_USE_NATIVE_THREAD  /* Ruby 1.9+ !!! */
 static VALUE
@@ -2178,7 +2193,7 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
     if (update_flag) DUMP1("update loop start!!");
 
     t.tv_sec = 0;
-    t.tv_usec = (long)(no_event_wait*1000.0);
+    t.tv_usec = 1000 * (long)no_event_wait;
 
     Tcl_DeleteTimerHandler(timer_token);
     run_timer_flag = 0;
@@ -2209,7 +2224,8 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
             event_loop_wait_event = 0;
 
             if (update_flag) {
-                event_flag = update_flag | TCL_DONT_WAIT; /* for safety */
+                event_flag = update_flag;
+                /* event_flag = update_flag | TCL_DONT_WAIT; */ /* for safety */
             } else {
 	        event_flag = TCL_ALL_EVENTS;
 	        /* event_flag = TCL_ALL_EVENTS | TCL_DONT_WAIT; */
@@ -2315,9 +2331,11 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
             found_event = 1;
 
             if (update_flag) {
-                event_flag = update_flag | TCL_DONT_WAIT; /* for safety */
+                event_flag = update_flag; /* for safety */
+                /* event_flag = update_flag | TCL_DONT_WAIT; */ /* for safety */
             } else {
-                event_flag = TCL_ALL_EVENTS | TCL_DONT_WAIT;
+                event_flag = TCL_ALL_EVENTS;
+                /* event_flag = TCL_ALL_EVENTS | TCL_DONT_WAIT; */
             }
 
             timer_tick = req_timer_tick;
@@ -2337,6 +2355,7 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
                 if (NIL_P(eventloop_thread) || current == eventloop_thread) {
                     int st;
                     int status;
+
 #ifdef RUBY_USE_NATIVE_THREAD
 		    if (update_flag) {
 		      st = RTEST(rb_protect(call_DoOneEvent,
@@ -2430,8 +2449,8 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
 
                         tick_counter += no_event_tick;
 
+#if 0
                         /* rb_thread_wait_for(t); */
-
                         rb_protect(eventloop_sleep, Qnil, &status);
 
                         if (status) {
@@ -2465,6 +2484,7 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
                                 }
                             }
                         }
+#endif
                     }
 
                 } else {
@@ -2506,9 +2526,9 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
             rb_thread_schedule();
         }
 
-        DUMP1("trap check & thread scheduling");
-#ifdef RUBY_USE_NATIVE_THREAD
-        /* if (update_flag == 0) CHECK_INTS; */ /*XXXXXXXXXXXXX  TODO !!!! */
+        DUMP1("check interrupts");
+#if defined(RUBY_USE_NATIVE_THREAD) || defined(RUBY_VM)
+	if (update_flag == 0) rb_thread_check_ints();
 #else
         if (update_flag == 0) CHECK_INTS;
 #endif
@@ -2533,6 +2553,8 @@ lib_eventloop_main_core(args)
     struct evloop_params *params = (struct evloop_params *)args;
 
     check_rootwidget_flag = params->check_root;
+
+    Tcl_CreateEventSource(rbtk_EventSetupProc, rbtk_EventCheckProc, (ClientData)args);
 
     if (lib_eventloop_core(params->check_root,
                            params->update_flag,
@@ -2585,6 +2607,8 @@ lib_eventloop_ensure(args)
 {
     struct evloop_params *ptr = (struct evloop_params *)args;
     volatile VALUE current_evloop = rb_thread_current();
+
+    Tcl_DeleteEventSource(rbtk_EventSetupProc, rbtk_EventCheckProc, (ClientData)args);
 
     DUMP2("eventloop_ensure: current-thread : %lx", current_evloop);
     DUMP2("eventloop_ensure: eventloop-thread : %lx", eventloop_thread);

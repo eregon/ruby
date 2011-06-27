@@ -284,7 +284,7 @@ module Logging
         log.print(open {yield @log})
       ensure
         @log.close if @log and not @log.closed?
-        File::open(tmplog) {|t| FileUtils.copy_stream(t, log)}
+        File::open(tmplog) {|t| FileUtils.copy_stream(t, log)} if File.exist?(tmplog)
         @log, @logfile, @orgout, @orgerr = log, *save
         @postpone -= 1
         rm_f tmplog
@@ -309,8 +309,8 @@ def xsystem command, opts = nil
     if opts and opts[:werror]
       result = nil
       Logging.postpone do |log|
-	result = (system(command) and File.zero?(log.path))
-	""
+        result = (system(command) and File.zero?(log.path))
+        ""
       end
       result
     else
@@ -392,33 +392,33 @@ end
 def link_command(ldflags, opt="", libpath=$DEFLIBPATH|$LIBPATH)
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote,
                                 'src' => "#{CONFTEST_C}",
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote,
                                 'INCFLAGS' => "#$INCFLAGS",
                                 'CPPFLAGS' => "#$CPPFLAGS",
                                 'CFLAGS' => "#$CFLAGS",
                                 'ARCH_FLAG' => "#$ARCH_FLAG",
                                 'LDFLAGS' => "#$LDFLAGS #{ldflags}",
-                                'LIBPATH' => libpathflag(libpath),
                                 'LOCAL_LIBS' => "#$LOCAL_LIBS #$libs",
                                 'LIBS' => "#$LIBRUBYARG_STATIC #{opt} #$LIBS")
+  conf['LIBPATH'] = libpathflag(libpath.map {|s| RbConfig::expand(s.dup, conf)})
   RbConfig::expand(TRY_LINK.dup, conf)
 end
 
 def cc_command(opt="")
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote, 'srcdir' => $srcdir.quote,
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote)
   RbConfig::expand("$(CC) #$INCFLAGS #$CPPFLAGS #$CFLAGS #$ARCH_FLAG #{opt} -c #{CONFTEST_C}",
-		   conf)
+                   conf)
 end
 
 def cpp_command(outfile, opt="")
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote, 'srcdir' => $srcdir.quote,
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote)
   RbConfig::expand("$(CPP) #$INCFLAGS #$CPPFLAGS #$CFLAGS #{opt} #{CONFTEST_C} #{outfile}",
-		   conf)
+                   conf)
 end
 
 def libpathflag(libpath=$DEFLIBPATH|$LIBPATH)
@@ -601,7 +601,7 @@ int main() {printf("%d\\n", conftest_const); return 0;}
 end
 
 # You should use +have_func+ rather than +try_func+.
-# 
+#
 # [+func+] a String which contains a symbol name
 # [+libs+] a String which contains library names.
 # [+headers+] a String or an Array of strings which contains
@@ -659,18 +659,18 @@ def egrep_cpp(pat, src, opt = "", &b)
     if Regexp === pat
       puts("    ruby -ne 'print if #{pat.inspect}'")
       f.grep(pat) {|l|
-	puts "#{f.lineno}: #{l}"
-	return true
+        puts "#{f.lineno}: #{l}"
+        return true
       }
       false
     else
       puts("    egrep '#{pat}'")
       begin
-	stdin = $stdin.dup
-	$stdin.reopen(f)
-	system("egrep", pat)
+        stdin = $stdin.dup
+        $stdin.reopen(f)
+        system("egrep", pat)
       ensure
-	$stdin.reopen(stdin)
+        $stdin.reopen(stdin)
       end
     end
   end
@@ -691,7 +691,7 @@ def macro_defined?(macro, src, opt = "", &b)
 SRC
 end
 
-# Returns whether or not 
+# Returns whether or not
 # * the +src+ can be compiled as a C source,
 # * the result object can be linked with its depending libraries successfully,
 # * the linked file can be invoked as an executable
@@ -867,11 +867,11 @@ def find_library(lib, func, *paths, &b)
     libs = append_library($libs, lib)
     begin
       until r = try_func(func, libs, &b) or paths.empty?
-	$LIBPATH = libpath | [paths.shift]
+        $LIBPATH = libpath | [paths.shift]
       end
       if r
-	$libs = libs
-	libpath = nil
+        $libs = libs
+        libpath = nil
       end
     ensure
       $LIBPATH = libpath if libpath
@@ -1013,6 +1013,10 @@ SRC
   end
 end
 
+# Returns whether or not the static type +type+ is defined.
+#
+# See also +have_type+
+#
 def try_type(type, headers = nil, opt = "", &b)
   if try_compile(<<"SRC", opt, &b)
 #{cpp_include(headers)}
@@ -1066,6 +1070,10 @@ def find_type(type, opt, *headers, &b)
   end
 end
 
+# Returns whether or not the Constant +const+ is defined.
+#
+# See also +have_const+
+#
 def try_const(const, headers = nil, opt = "", &b)
   const, type = *const
   if try_compile(<<"SRC", opt, &b)
@@ -1209,18 +1217,18 @@ def convertible_int(type, headers = nil, opts = nil, &b)
       u = "unsigned " if signed > 0
       prelude << "extern rbcv_typedef_ foo();"
       compat = UNIVERSAL_INTS.find {|t|
-	try_compile([prelude, "extern #{u}#{t} foo();"].join("\n"), opts, :werror=>true, &b)
+        try_compile([prelude, "extern #{u}#{t} foo();"].join("\n"), opts, :werror=>true, &b)
       }
       if compat
-	macname ||= type.sub(/_(?=t\z)/, '').tr_cpp
-	conv = (compat == "long long" ? "LL" : compat.upcase)
-	compat = "#{u}#{compat}"
-	$defs.push(format("-DTYPEOF_%s=%s", type.tr_cpp, compat.quote))
-	$defs.push(format("-DPRI_%s_PREFIX=PRI_%s_PREFIX", macname, conv))
-	conv = (u ? "U" : "") + conv
-	$defs.push(format("-D%s2NUM=%s2NUM", macname, conv))
-	$defs.push(format("-DNUM2%s=NUM2%s", macname, conv))
-	compat
+        macname ||= type.sub(/_(?=t\z)/, '').tr_cpp
+        conv = (compat == "long long" ? "LL" : compat.upcase)
+        compat = "#{u}#{compat}"
+        $defs.push(format("-DTYPEOF_%s=%s", type.tr_cpp, compat.quote))
+        $defs.push(format("-DPRI_%s_PREFIX=PRI_%s_PREFIX", macname, conv))
+        conv = (u ? "U" : "") + conv
+        $defs.push(format("-D%s2NUM=%s2NUM", macname, conv))
+        $defs.push(format("-DNUM2%s=NUM2%s", macname, conv))
+        compat
       end
     end
   end
@@ -1327,11 +1335,20 @@ end
 # Internal use only.
 #
 def find_executable0(bin, path = nil)
+  executable_file = proc do |name|
+    begin
+      stat = File.stat(name)
+    rescue SystemCallError
+    else
+      next name if stat.file? and stat.executable?
+    end
+  end
+
   exts = config_string('EXECUTABLE_EXTS') {|s| s.split} || config_string('EXEEXT') {|s| [s]}
   if File.expand_path(bin) == bin
-    return bin if File.executable?(bin)
+    return bin if executable_file.call(bin)
     if exts
-      exts.each {|ext| File.executable?(file = bin + ext) and return file}
+      exts.each {|ext| executable_file.call(file = bin + ext) and return file}
     end
     return nil
   end
@@ -1342,9 +1359,9 @@ def find_executable0(bin, path = nil)
   end
   file = nil
   path.each do |dir|
-    return file if File.executable?(file = File.join(dir, bin))
+    return file if executable_file.call(file = File.join(dir, bin))
     if exts
-      exts.each {|ext| File.executable?(ext = file + ext) and return ext}
+      exts.each {|ext| executable_file.call(ext = file + ext) and return ext}
     end
   end
   nil
@@ -1631,7 +1648,7 @@ ECHO = $(ECHO1:0=@echo)
 srcdir = #{srcdir.gsub(/\$\((srcdir)\)|\$\{(srcdir)\}/) {mkintpath(CONFIG[$1||$2])}.quote}
 topdir = #{mkintpath($extmk ? CONFIG["topdir"] : $topdir).quote}
 hdrdir = #{mkintpath(CONFIG["hdrdir"]).quote}
-arch_hdrdir = #{$arch_hdrdir}
+arch_hdrdir = #{$arch_hdrdir.quote}
 VPATH = #{vpath.join(CONFIG['PATH_SEPARATOR'])}
 }
   if $extmk
@@ -1713,7 +1730,7 @@ preload = #{defined?($preload) && $preload ? $preload.join(' ') : ''}
       x.gsub!(/^(MAKEDIRS|INSTALL_(?:PROG|DATA))+\s*=.*\n/) do
         "!ifndef " + $1 + "\n" +
         $& +
-	"!endif\n"
+        "!endif\n"
       end
     end
   end
@@ -1721,6 +1738,8 @@ preload = #{defined?($preload) && $preload ? $preload.join(' ') : ''}
 end
 # :startdoc:
 
+# creates a stub Makefile.
+#
 def dummy_makefile(srcdir)
   configuration(srcdir) << <<RULES << CLEANINGS
 CLEANFILES = #{$cleanfiles.join(' ')}
@@ -1733,6 +1752,11 @@ all install static install-so install-rb: Makefile
 RULES
 end
 
+# Processes the data contents of the "depend" file.
+# Each line of this file is expected to be a file name.
+#
+# Returns the output of findings, in Makefile format.
+#
 def depend_rules(depend)
   suffixes = []
   depout = []
@@ -1982,7 +2006,7 @@ static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
       mfile.print "#{dest}: #{f}\n\t@-$(MAKEDIRS) $(@D#{sep})\n"
       mfile.print "\t$(INSTALL_PROG) #{fseprepl[f]} $(@D#{sep})\n"
       if defined?($installed_list)
-	mfile.print "\t@echo #{dir}/#{File.basename(f)}>>$(INSTALLED_LIST)\n"
+        mfile.print "\t@echo #{dir}/#{File.basename(f)}>>$(INSTALLED_LIST)\n"
       end
     end
   else
@@ -1996,17 +2020,17 @@ static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
     files = install_files(mfile, i, nil, srcprefix) or next
     for dir, *files in files
       unless dirs.include?(dir)
-	dirs << dir
-	mfile.print "pre-install-rb#{sfx}: #{dir}\n"
+        dirs << dir
+        mfile.print "pre-install-rb#{sfx}: #{dir}\n"
       end
       for f in files
-	dest = "#{dir}/#{File.basename(f)}"
-	mfile.print("install-rb#{sfx}: #{dest} #{dir}\n")
-	mfile.print("#{dest}: #{f}\n")
-	mfile.print("\t$(Q) $(#{$extout ? 'COPY' : 'INSTALL_DATA'}) #{f} $(@D#{sep})\n")
-	if defined?($installed_list) and !$extout
-	  mfile.print("\t@echo #{dest}>>$(INSTALLED_LIST)\n")
-	end
+        dest = "#{dir}/#{File.basename(f)}"
+        mfile.print("install-rb#{sfx}: #{dest} #{dir}\n")
+        mfile.print("#{dest}: #{f}\n")
+        mfile.print("\t$(Q) $(#{$extout ? 'COPY' : 'INSTALL_DATA'}) #{f} $(@D#{sep})\n")
+        if defined?($installed_list) and !$extout
+          mfile.print("\t@echo #{dest}>>$(INSTALLED_LIST)\n")
+        end
         if $extout
           mfile.print("clean-rb#{sfx}::\n")
           mfile.print("\t@-$(RM) #{fseprepl[dest]}\n")

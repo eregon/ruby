@@ -70,21 +70,29 @@ module Psych
 
       def accept target
         # return any aliases we find
-        if node = @st[target.object_id]
-          node.anchor = target.object_id.to_s
-          return @emitter.alias target.object_id.to_s
+        if @st.key? target.object_id
+          oid         = target.object_id
+          node        = @st[oid]
+          anchor      = oid.to_s
+          node.anchor = anchor
+          return @emitter.alias anchor
         end
 
         if target.respond_to?(:to_yaml)
-          loc = target.method(:to_yaml).source_location.first
-          if loc !~ /(syck\/rubytypes.rb|psych\/core_ext.rb)/
-            unless target.respond_to?(:encode_with)
-              if $VERBOSE
-                warn "implementing to_yaml is deprecated, please implement \"encode_with\""
-              end
+          begin
+            loc = target.method(:to_yaml).source_location.first
+            if loc !~ /(syck\/rubytypes.rb|psych\/core_ext.rb)/
+              unless target.respond_to?(:encode_with)
+                if $VERBOSE
+                  warn "implementing to_yaml is deprecated, please implement \"encode_with\""
+                end
 
-              target.to_yaml(:nodump => true)
+                target.to_yaml(:nodump => true)
+              end
             end
+          rescue
+            # public_method or source_location might be overridden,
+            # and it's OK to skip it since it's only to emit a warning
           end
         end
 
@@ -238,8 +246,14 @@ module Psych
         end
       end
 
+      def visit_Module o
+        raise TypeError, "can't dump anonymous module: #{o}" unless o.name
+        @emitter.scalar o.name, nil, '!ruby/module', false, false, Nodes::Scalar::SINGLE_QUOTED
+      end
+
       def visit_Class o
-        raise TypeError, "can't dump anonymous class #{o.class}"
+        raise TypeError, "can't dump anonymous class: #{o}" unless o.name
+        @emitter.scalar o.name, nil, '!ruby/class', false, false, Nodes::Scalar::SINGLE_QUOTED
       end
 
       def visit_Range o
@@ -251,7 +265,10 @@ module Psych
       end
 
       def visit_Hash o
-        register(o, @emitter.start_mapping(nil, nil, true, Psych::Nodes::Mapping::BLOCK))
+        tag      = o.class == ::Hash ? nil : "!ruby/hash:#{o.class}"
+        implicit = !tag
+
+        register(o, @emitter.start_mapping(nil, tag, implicit, Psych::Nodes::Mapping::BLOCK))
 
         o.each do |k,v|
           accept k
@@ -289,7 +306,7 @@ module Psych
       private
       def format_time time
         if time.utc?
-          time.strftime("%Y-%m-%d %H:%M:%S.%9NZ")
+          time.strftime("%Y-%m-%d %H:%M:%S.%9N Z")
         else
           time.strftime("%Y-%m-%d %H:%M:%S.%9N %:z")
         end
@@ -297,12 +314,17 @@ module Psych
 
       # FIXME: remove this method once "to_yaml_properties" is removed
       def find_ivars target
-        loc = target.method(:to_yaml_properties).source_location.first
-        unless loc.start_with?(Psych::DEPRECATED) || loc.end_with?('rubytypes.rb')
-          if $VERBOSE
-            warn "#{loc}: to_yaml_properties is deprecated, please implement \"encode_with(coder)\""
+        begin
+          loc = target.method(:to_yaml_properties).source_location.first
+          unless loc.start_with?(Psych::DEPRECATED) || loc.end_with?('rubytypes.rb')
+            if $VERBOSE
+              warn "#{loc}: to_yaml_properties is deprecated, please implement \"encode_with(coder)\""
+            end
+            return target.to_yaml_properties
           end
-          return target.to_yaml_properties
+        rescue
+          # public_method or source_location might be overridden,
+          # and it's OK to skip it since it's only to emit a warning.
         end
 
         target.instance_variables

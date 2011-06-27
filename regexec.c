@@ -1254,7 +1254,8 @@ match_at(regex_t* reg, const UChar* str, const UChar* end,
 {
   static const UChar FinishCode[] = { OP_FINISH };
 
-  int i, n, num_mem, best_len, pop_level;
+  int i, num_mem, best_len, pop_level;
+  ptrdiff_t n;
   LengthType tlen, tlen2;
   MemNumType mem;
   RelAddrType addr;
@@ -1331,14 +1332,14 @@ match_at(regex_t* reg, const UChar* str, const UChar* end,
 #ifdef USE_FIND_LONGEST_SEARCH_ALL_OF_RANGE
 	if (IS_FIND_LONGEST(option)) {
 	  if (n > msa->best_len) {
-	    msa->best_len = n;
+	    msa->best_len = (int)n;
 	    msa->best_s   = (UChar* )sstart;
 	  }
 	  else
 	    goto end_best_len;
         }
 #endif
-	best_len = n;
+	best_len = (int)n;
 	region = msa->region;
 	if (region) {
 #ifdef USE_POSIX_API_REGION_OPTION
@@ -1365,18 +1366,16 @@ match_at(regex_t* reg, const UChar* str, const UChar* end,
 	  }
 	  else {
 #endif /* USE_POSIX_API_REGION_OPTION */
-	    region->beg[0] = sstart - str;
-	    region->end[0] = s      - str;
+	    region->beg[0] = (int)(sstart - str);
+	    region->end[0] = (int)(s      - str);
 	    for (i = 1; i <= num_mem; i++) {
 	      if (mem_end_stk[i] != INVALID_STACK_INDEX) {
-		if (BIT_STATUS_AT(reg->bt_mem_start, i))
-		  region->beg[i] = STACK_AT(mem_start_stk[i])->u.mem.pstr - str;
-		else
-		  region->beg[i] = (UChar* )((void* )mem_start_stk[i]) - str;
-
-		region->end[i] = (BIT_STATUS_AT(reg->bt_mem_end, i)
-				  ? STACK_AT(mem_end_stk[i])->u.mem.pstr
-				  : (UChar* )((void* )mem_end_stk[i])) - str;
+		region->beg[i] = (int)((BIT_STATUS_AT(reg->bt_mem_start, i))
+		  ? STACK_AT(mem_start_stk[i])->u.mem.pstr - str
+		  : (UChar* )((void* )mem_start_stk[i]) - str);
+		region->end[i] = (int)(BIT_STATUS_AT(reg->bt_mem_end, i)
+				  ? STACK_AT(mem_end_stk[i])->u.mem.pstr - str
+				  : (UChar* )((void* )mem_end_stk[i]) - str);
 	      }
 	      else {
 		region->beg[i] = region->end[i] = ONIG_REGION_NOTPOS;
@@ -2201,7 +2200,7 @@ match_at(regex_t* reg, const UChar* str, const UChar* end,
 	n = pend - pstart;
 	DATA_ENSURE(n);
 	sprev = s;
-	STRING_CMP_IC(case_fold_flag, pstart, &s, n, end);
+	STRING_CMP_IC(case_fold_flag, pstart, &s, (int)n, end);
 	while (sprev + (len = enclen(encode, sprev, end)) < s)
 	  sprev += len;
 
@@ -2273,7 +2272,7 @@ match_at(regex_t* reg, const UChar* str, const UChar* end,
 	  DATA_ENSURE(n);
 	  sprev = s;
 	  swork = s;
-	  STRING_CMP_VALUE_IC(case_fold_flag, pstart, &swork, n, end, is_fail);
+	  STRING_CMP_VALUE_IC(case_fold_flag, pstart, &swork, (int)n, end, is_fail);
 	  if (is_fail) continue;
 	  s = swork;
 	  while (sprev + (len = enclen(encode, sprev, end)) < s)
@@ -2898,11 +2897,11 @@ bm_search_notrev(regex_t* reg, const UChar* target, const UChar* target_end,
 {
   const UChar *s, *se, *t, *p, *end;
   const UChar *tail;
-  int skip, tlen1;
+  ptrdiff_t skip, tlen1;
 
 #ifdef ONIG_DEBUG_SEARCH
-  fprintf(stderr, "bm_search_notrev: text: %d, text_end: %d, text_range: %d\n",
-	  (int )text, (int )text_end, (int )text_range);
+  fprintf(stderr, "bm_search_notrev: text: %"PRIuPTR", text_end: %"PRIuPTR", text_range: %"PRIuPTR"\n",
+	  text, text_end, text_range);
 #endif
 
   tail = target_end - 1;
@@ -2954,6 +2953,11 @@ bm_search(regex_t* reg, const UChar* target, const UChar* target_end,
   const UChar *s, *t, *p, *end;
   const UChar *tail;
 
+#ifdef ONIG_DEBUG_SEARCH
+  fprintf(stderr, "bm_search: text: %"PRIuPTR", text_end: %"PRIuPTR", text_range: %"PRIuPTR"\n",
+	  text, text_end, text_range);
+#endif
+
   end = text_range + (target_end - target) - 1;
   if (end > text_end)
     end = text_end;
@@ -2964,6 +2968,10 @@ bm_search(regex_t* reg, const UChar* target, const UChar* target_end,
     while (s < end) {
       p = s;
       t = tail;
+#ifdef ONIG_DEBUG_SEARCH
+  fprintf(stderr, "bm_search_loop: pos: %d %s\n",
+	  (int)(s - text), s);
+#endif
       while (*p == *t) {
 	if (t == target) return (UChar* )p;
 	p--; t--;
@@ -2997,7 +3005,7 @@ set_bm_backward_skip(UChar* s, UChar* end, OnigEncoding enc ARG_UNUSED,
     if (IS_NULL(*skip)) return ONIGERR_MEMORY;
   }
 
-  len = end - s;
+  len = (int)(end - s);
   for (i = 0; i < ONIG_CHAR_TABLE_SIZE; i++)
     (*skip)[i] = len;
 
@@ -3137,8 +3145,8 @@ forward_search_range(regex_t* reg, const UChar* str, const UChar* end, UChar* s,
   UChar *p, *pprev = (UChar* )NULL;
 
 #ifdef ONIG_DEBUG_SEARCH
-  fprintf(stderr, "forward_search_range: str: %d, end: %d, s: %d, range: %d\n",
-	  (int )str, (int )end, (int )s, (int )range);
+  fprintf(stderr, "forward_search_range: str: %"PRIuPTR", end: %"PRIuPTR", s: %"PRIuPTR", range: %"PRIuPTR"\n",
+	  str, end, s, range);
 #endif
 
   p = s;
@@ -3370,7 +3378,7 @@ extern long
 onig_search(regex_t* reg, const UChar* str, const UChar* end,
 	    const UChar* start, const UChar* range, OnigRegion* region, OnigOptionType option)
 {
-  int r;
+  long r;
   UChar *s, *prev;
   OnigMatchArg msa;
   const UChar *orig_start = start;
@@ -3405,8 +3413,8 @@ onig_search(regex_t* reg, const UChar* str, const UChar* end,
 
 #ifdef ONIG_DEBUG_SEARCH
   fprintf(stderr,
-     "onig_search (entry point): str: %d, end: %d, start: %d, range: %d\n",
-     (int )str, (int )(end - str), (int )(start - str), (int )(range - str));
+     "onig_search (entry point): str: %"PRIuPTR", end: %"PRIuPTR", start: %"PRIuPTR", range: %"PRIuPTR"\n",
+     str, end - str, start - str, range - str);
 #endif
 
   if (region

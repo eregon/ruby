@@ -4,4 +4,6 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-TestGem::TEST_PLUGIN_LOAD = :loaded
+class TestGem
+  TEST_PLUGIN_LOAD = :loaded
+end

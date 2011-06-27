@@ -23,6 +23,7 @@
 #include "ruby/io.h"
 #include "ruby/util.h"
 #include "dln.h"
+#include "internal.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -489,7 +490,7 @@ static VALUE
 rb_stat_rdev(VALUE self)
 {
 #ifdef HAVE_ST_RDEV
-    return ULONG2NUM(get_stat(self)->st_rdev);
+    return DEVT2NUM(get_stat(self)->st_rdev);
 #else
     return Qnil;
 #endif
@@ -510,8 +511,7 @@ static VALUE
 rb_stat_rdev_major(VALUE self)
 {
 #if defined(HAVE_ST_RDEV) && defined(major)
-    long rdev = get_stat(self)->st_rdev;
-    return ULONG2NUM(major(rdev));
+    return DEVT2NUM(major(get_stat(self)->st_rdev));
 #else
     return Qnil;
 #endif
@@ -532,8 +532,7 @@ static VALUE
 rb_stat_rdev_minor(VALUE self)
 {
 #if defined(HAVE_ST_RDEV) && defined(minor)
-    long rdev = get_stat(self)->st_rdev;
-    return ULONG2NUM(minor(rdev));
+    return DEVT2NUM(minor(get_stat(self)->st_rdev));
 #else
     return Qnil;
 #endif
@@ -835,15 +834,18 @@ w32_io_info(VALUE *file, BY_HANDLE_FILE_INFORMATION *st)
 	VALUE tmp;
 	WCHAR *ptr;
 	int len;
+	VALUE v;
+
 	FilePathValue(*file);
 	tmp = rb_str_encode_ospath(*file);
 	len = MultiByteToWideChar(CP_UTF8, 0, RSTRING_PTR(tmp), -1, NULL, 0);
-	ptr = ALLOCA_N(WCHAR, len);
+	ptr = ALLOCV_N(WCHAR, v, len);
 	MultiByteToWideChar(CP_UTF8, 0, RSTRING_PTR(tmp), -1, ptr, len);
 	f = CreateFileW(ptr, 0,
 			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
 			rb_w32_iswin95() ? 0 : FILE_FLAG_BACKUP_SEMANTICS,
 			NULL);
+	ALLOCV_END(v);
 	if (f == INVALID_HANDLE_VALUE) return f;
 	ret = f;
     }
@@ -979,6 +981,7 @@ rb_file_lstat(VALUE obj)
 static int
 rb_group_member(GETGROUPS_T gid)
 {
+    int rv = FALSE;
 #ifndef _WIN32
     if (getgid() == gid || getegid() == gid)
 	return TRUE;
@@ -992,17 +995,22 @@ rb_group_member(GETGROUPS_T gid)
 #   endif
 #  endif
     {
-	GETGROUPS_T gary[NGROUPS];
+	GETGROUPS_T *gary;
 	int anum;
 
+	gary = xmalloc(NGROUPS * sizeof(GETGROUPS_T));
 	anum = getgroups(NGROUPS, gary);
-	while (--anum >= 0)
-	    if (gary[anum] == gid)
-		return TRUE;
+	while (--anum >= 0) {
+	    if (gary[anum] == gid) {
+		rv = TRUE;
+		break;
+	    }
+	}
+	xfree(gary);
     }
 # endif
 #endif
-    return FALSE;
+    return rv;
 }
 
 #ifndef S_IXUGO
@@ -2195,8 +2203,6 @@ rb_file_s_lchown(int argc, VALUE *argv)
 #else
 #define rb_file_s_lchown rb_f_notimplement
 #endif
-
-struct timespec rb_time_timespec(VALUE time);
 
 struct utime_args {
     const struct timespec* tsp;
@@ -3954,7 +3960,7 @@ rb_file_truncate(VALUE obj, VALUE len)
 	rb_sys_fail_path(fptr->pathv);
 #else /* defined(HAVE_CHSIZE) */
     if (chsize(fptr->fd, pos) < 0)
-	rb_sys_fail(fptr->pathv);
+	rb_sys_fail_path(fptr->pathv);
 #endif
     return INT2FIX(0);
 }
@@ -4055,7 +4061,7 @@ rb_file_flock(VALUE obj, VALUE operation)
     if (fptr->mode & FMODE_WRITABLE) {
 	rb_io_flush(obj);
     }
-    while ((int)rb_thread_blocking_region(rb_thread_flock, op, RUBY_UBF_IO, 0) < 0) {
+    while ((int)rb_thread_io_blocking_region(rb_thread_flock, op, fptr->fd) < 0) {
 	switch (errno) {
 	  case EAGAIN:
 	  case EACCES:
@@ -5000,7 +5006,8 @@ path_check_0(VALUE path, int execpath)
 	    && !(p && execpath && (st.st_mode & S_ISVTX))
 #endif
 	    && !access(p0, W_OK)) {
-	    rb_warn("Insecure world writable dir %s in %sPATH, mode 0%o",
+	    rb_warn("Insecure world writable dir %s in %sPATH, mode 0%"
+		    PRI_MODET_PREFIX"o",
 		    p0, (execpath ? "" : "LOAD_"), st.st_mode);
 	    if (p) *p = '/';
 	    RB_GC_GUARD(path);
@@ -5079,8 +5086,6 @@ is_explicit_relative(const char *path)
     if (*path == '.') path++;
     return isdirsep(*path);
 }
-
-VALUE rb_get_load_path(void);
 
 static VALUE
 copy_path_class(VALUE path, VALUE orig)

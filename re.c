@@ -13,6 +13,7 @@
 #include "ruby/re.h"
 #include "ruby/encoding.h"
 #include "ruby/util.h"
+#include "internal.h"
 #include "regint.h"
 #include <ctype.h>
 
@@ -314,8 +315,6 @@ rb_reg_check(VALUE re)
     }
 }
 
-int rb_str_buf_cat_escaped_char(VALUE result, unsigned int c, int unicode_p);
-
 static void
 rb_reg_expr_str(VALUE str, const char *s, long len,
 	rb_encoding *enc, rb_encoding *resenc)
@@ -590,7 +589,7 @@ rb_reg_to_s(VALUE re)
 static void
 rb_reg_raise(const char *s, long len, const char *err, VALUE re)
 {
-    VALUE desc = rb_reg_desc(s, len, re);
+    volatile VALUE desc = rb_reg_desc(s, len, re);
 
     rb_raise(rb_eRegexpError, "%s: %s", err, RSTRING_PTR(desc));
 }
@@ -2713,7 +2712,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
  *  The parser detects 'regexp-literal =~ expression' for the assignment.
  *  The regexp must be a literal without interpolation and placed at left hand side.
  *
- *  The assignment is not occur if the regexp is not a literal.
+ *  The assignment does not occur if the regexp is not a literal.
  *
  *     re = /(?<lhs>\w+)\s*=\s*(?<rhs>\w+)/
  *     re =~ "  x = y  "
@@ -2727,7 +2726,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
  *     /(?<lhs>\w+)\s*=\s*#{rhs_pat}/ =~ "x = y"
  *     p lhs    # undefined local variable
  *
- *  The assignment is not occur if the regexp is placed at right hand side.
+ *  The assignment does not occur if the regexp is placed at the right hand side.
  *
  *    "  x = y  " =~ /(?<lhs>\w+)\s*=\s*(?<rhs>\w+)/
  *    p lhs, rhs # undefined local variable
@@ -3558,10 +3557,16 @@ Init_Regexp(void)
     rb_define_method(rb_cRegexp, "names", rb_reg_names, 0);
     rb_define_method(rb_cRegexp, "named_captures", rb_reg_named_captures, 0);
 
+    /* see Regexp.options and Regexp.new */
     rb_define_const(rb_cRegexp, "IGNORECASE", INT2FIX(ONIG_OPTION_IGNORECASE));
+    /* see Regexp.options and Regexp.new */
     rb_define_const(rb_cRegexp, "EXTENDED", INT2FIX(ONIG_OPTION_EXTEND));
+    /* see Regexp.options and Regexp.new */
     rb_define_const(rb_cRegexp, "MULTILINE", INT2FIX(ONIG_OPTION_MULTILINE));
+    /* see Regexp.options and Regexp.new */
     rb_define_const(rb_cRegexp, "FIXEDENCODING", INT2FIX(ARG_ENCODING_FIXED));
+    /* see Regexp.options and Regexp.new */
+    rb_define_const(rb_cRegexp, "NOENCODING", INT2FIX(ARG_ENCODING_NONE));
 
     rb_global_variable(&reg_cache);
 

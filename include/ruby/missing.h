@@ -19,9 +19,7 @@ extern "C" {
 #endif
 
 #include "ruby/config.h"
-#if defined(HAVE_STDDEF_H)
-#  include <stddef.h>
-#endif
+#include <stddef.h>
 #ifdef RUBY_EXTCONF_H
 #include RUBY_EXTCONF_H
 #endif
@@ -82,6 +80,10 @@ RUBY_EXTERN int dup2(int, int);
 RUBY_EXTERN int eaccess(const char*, int);
 #endif
 
+#ifndef HAVE_ROUND
+RUBY_EXTERN double round(double);	/* numeric.c */
+#endif
+
 #ifndef HAVE_FINITE
 RUBY_EXTERN int finite(double);
 #endif
@@ -117,9 +119,28 @@ RUBY_EXTERN double lgamma_r(double, int *);
 RUBY_EXTERN double cbrt(double);
 #endif
 
+#ifdef INFINITY
+# define HAVE_INFINITY
+#else
+/** @internal */
+RUBY_EXTERN const unsigned char rb_infinity[];
+# define INFINITY (*(float *)rb_infinity)
+#endif
+
+#ifdef NAN
+# define HAVE_NAN
+#else
+/** @internal */
+RUBY_EXTERN const unsigned char rb_nan[];
+# define NAN (*(float *)rb_nan)
+#endif
+
 #ifndef isinf
 # ifndef HAVE_ISINF
 #  if defined(HAVE_FINITE) && defined(HAVE_ISNAN)
+#    ifdef HAVE_IEEEFP_H
+#    include <ieeefp.h>
+#    endif
 #  define isinf(x) (!finite(x) && !isnan(x))
 #  else
 RUBY_EXTERN int isinf(double);
@@ -191,6 +212,10 @@ RUBY_EXTERN int ruby_getpeername(int, struct sockaddr *, socklen_t *);
 RUBY_EXTERN int ruby_getsockname(int, struct sockaddr *, socklen_t *);
 RUBY_EXTERN int ruby_shutdown(int, int);
 RUBY_EXTERN int ruby_close(int);
+#endif
+
+#ifndef HAVE_SETPROCTITLE
+RUBY_EXTERN void setproctitle(const char *fmt, ...);
 #endif
 
 #if defined __GNUC__ && __GNUC__ >= 4

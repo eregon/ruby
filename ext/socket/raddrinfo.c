@@ -545,7 +545,7 @@ addrinfo_s_allocate(VALUE klass)
     return TypedData_Wrap_Struct(klass, &addrinfo_type, 0);
 }
 
-#define IS_ADDRINFO(obj) rb_typeddata_is_kind_of(obj, &addrinfo_type)
+#define IS_ADDRINFO(obj) rb_typeddata_is_kind_of((obj), &addrinfo_type)
 static inline rb_addrinfo_t *
 check_addrinfo(VALUE self)
 {
@@ -1403,6 +1403,7 @@ addrinfo_protocol(VALUE self)
 /*
  * call-seq:
  *   addrinfo.to_sockaddr => string
+ *   addrinfo.to_s => string
  *
  * returns the socket address as packed struct sockaddr string.
  *

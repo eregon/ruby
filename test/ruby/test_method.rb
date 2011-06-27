@@ -92,6 +92,32 @@ class TestMethod < Test::Unit::TestCase
     assert_nil(eval("class TestCallee; __method__; end"))
   end
 
+  def test_method_in_define_method_block
+    bug4606 = '[ruby-core:35386]'
+    c = Class.new do
+      [:m1, :m2].each do |m|
+        define_method(m) do
+          __method__
+        end
+      end
+    end
+    assert_equal(:m1, c.new.m1, bug4606)
+    assert_equal(:m2, c.new.m2, bug4606)
+  end
+
+  def test_method_in_block_in_define_method_block
+    bug4606 = '[ruby-core:35386]'
+    c = Class.new do
+      [:m1, :m2].each do |m|
+        define_method(m) do
+          tap { return __method__ }
+        end
+      end
+    end
+    assert_equal(:m1, c.new.m1, bug4606)
+    assert_equal(:m2, c.new.m2, bug4606)
+  end
+
   def test_body
     o = Object.new
     def o.foo; end
@@ -205,6 +231,20 @@ class TestMethod < Test::Unit::TestCase
     assert_raise(TypeError) do
       Class.new.class_eval {define_method(:meth, M.instance_method(:meth))}
     end
+  end
+
+  def test_super_in_proc_from_define_method
+    c1 = Class.new {
+      def m
+        :m1
+      end
+    }
+    c2 = Class.new(c1) { define_method(:m) { Proc.new { super() } } }
+    # c2.new.m.call should return :m1, but currently it raise NoMethodError.
+    # see [Bug #4881] and [Bug #3136]
+    assert_raise(NoMethodError) {
+      c2.new.m.call
+    }
   end
 
   def test_clone

@@ -4,9 +4,9 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 
-class TestKernel < RubyGemTestCase
+class TestKernel < Gem::TestCase
 
   def setup
     super
@@ -27,7 +27,7 @@ class TestKernel < RubyGemTestCase
     assert $:.any? { |p| %r{a-1/lib} =~ p }
   end
 
-  def test_gem_redundent
+  def test_gem_redundant
     assert gem('a', '= 1'), "Should load"
     refute gem('a', '= 1'), "Should not load"
     assert_equal 1, $:.select { |p| %r{a-1/lib} =~ p }.size
@@ -46,10 +46,9 @@ class TestKernel < RubyGemTestCase
       gem 'a', '= 2'
     end
 
-    assert_match(/activate a \(= 2, runtime\)/, ex.message)
+    assert_equal "can't activate a-2, already activated a-1", ex.message
     assert_match(/activated a-1/, ex.message)
     assert_equal 'a', ex.name
-    assert_equal Gem::Requirement.new('= 2'), ex.requirement
 
     assert $:.any? { |p| %r{a-1/lib} =~ p }
     refute $:.any? { |p| %r{a-2/lib} =~ p }

@@ -4,10 +4,10 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems/commands/sources_command'
 
-class TestGemCommandsSourcesCommand < RubyGemTestCase
+class TestGemCommandsSourcesCommand < Gem::TestCase
 
   def setup
     super
@@ -42,12 +42,11 @@ class TestGemCommandsSourcesCommand < RubyGemTestCase
   def test_execute_add
     util_setup_fake_fetcher
 
-    si = Gem::SourceIndex.new
-    si.add_spec @a1
+    install_specs @a1
 
-    specs = si.map do |_, spec|
+    specs = Gem::Specification.map { |spec|
       [spec.name, spec.version, spec.original_platform]
-    end
+    }
 
     specs_dump_gz = StringIO.new
     Zlib::GzipWriter.wrap specs_dump_gz do |io|
@@ -90,7 +89,7 @@ class TestGemCommandsSourcesCommand < RubyGemTestCase
     util_setup_spec_fetcher
 
     use_ui @ui do
-      assert_raises MockGemUi::TermError do
+      assert_raises Gem::MockGemUi::TermError do
         @cmd.execute
       end
     end
@@ -110,7 +109,7 @@ Error fetching http://beta-gems.example.com:
     util_setup_spec_fetcher
 
     use_ui @ui do
-      assert_raises MockGemUi::TermError do
+      assert_raises Gem::MockGemUi::TermError do
         @cmd.execute
       end
     end
@@ -187,18 +186,18 @@ beta-gems.example.com is not a URI
     @cmd.handle_options %w[--update]
 
     util_setup_fake_fetcher
-    source_index = util_setup_spec_fetcher @a1
+    util_setup_spec_fetcher @a1
 
-    specs = source_index.map do |name, spec|
+    specs = Gem::Specification.map { |spec|
       [spec.name, spec.version, spec.original_platform]
-    end
+    }
 
     @fetcher.data["#{@gem_repo}specs.#{Gem.marshal_version}.gz"] =
       util_gzip Marshal.dump(specs)
 
-    latest_specs = source_index.latest_specs.map do |spec|
+    latest_specs = Gem::Specification.latest_specs.map { |spec|
       [spec.name, spec.version, spec.original_platform]
-    end
+    }
 
     @fetcher.data["#{@gem_repo}latest_specs.#{Gem.marshal_version}.gz"] =
       util_gzip Marshal.dump(latest_specs)

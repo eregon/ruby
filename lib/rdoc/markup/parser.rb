@@ -321,7 +321,7 @@ class RDoc::Markup::Parser
         next
       end
 
-      # indentation change: break or verbattim
+      # indentation change: break or verbatim
       if column < indent then
         unget
         break
@@ -478,6 +478,7 @@ require 'rdoc/markup/list'
 require 'rdoc/markup/list_item'
 require 'rdoc/markup/raw'
 require 'rdoc/markup/paragraph'
+require 'rdoc/markup/indented_paragraph'
 require 'rdoc/markup/rule'
 require 'rdoc/markup/verbatim'
 

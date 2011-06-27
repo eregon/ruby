@@ -1372,7 +1372,7 @@ class TestTranscode < Test::Unit::TestCase
                  "\xA1\xA1".encode("ISO-2022-JP", "EUC-JP"))
   end
 
-  def test_cp50221
+  def test_from_cp50221
     assert_equal("!", "\e(B\x21".encode("utf-8", "cp50221"))
     assert_equal("!", "\e(J\x21".encode("utf-8", "cp50221"))
     assert_equal("\uFF71",     "\xB1".encode("utf-8", "cp50221"))
@@ -1388,10 +1388,11 @@ class TestTranscode < Test::Unit::TestCase
     assert_equal("\u5fde", "\e$B\x7A\x21".encode("utf-8", "cp50221"))
     assert_equal("\u72be", "\e$B\x7B\x21".encode("utf-8", "cp50221"))
     assert_equal("\u91d7", "\e$B\x7C\x21".encode("utf-8", "cp50221"))
-    assert_equal("\e(I!_\e(B", "\xA1\xDF".encode("cp50220","sjis"))
+    assert_equal("\xA1\xDF".force_encoding("sjis"),
+                 "\e(I!_\e(B".encode("sjis","cp50220"))
   end
 
-  def test_cp50221
+  def test_to_cp50221
     assert_equal("\e$B!#!,\e(B".force_encoding("cp50220"),
                  "\xA1\xDF".encode("cp50220","sjis"))
     assert_equal("\e$B%*!+%,%I%J!+%N!+%P%\\%^!+%Q%]%\"\e(B".force_encoding("cp50220"),
@@ -1408,7 +1409,7 @@ class TestTranscode < Test::Unit::TestCase
       "\x61\xF1\x80\x80\xE1\x80\xC2\x62".encode('UTF-16BE', 'UTF-8', invalid: :replace)) # option 2
     assert_equal("\x61\x00\xFD\xFF\xFD\xFF\xFD\xFF\x62\x00".force_encoding('UTF-16LE'),
       "\x61\xF1\x80\x80\xE1\x80\xC2\x62".encode('UTF-16LE', 'UTF-8', invalid: :replace)) # option 2
-    
+
     # additional clarification
     assert_equal("\xFF\xFD\xFF\xFD\xFF\xFD\xFF\xFD".force_encoding('UTF-16BE'),
       "\xF0\x80\x80\x80".encode('UTF-16BE', 'UTF-8', invalid: :replace))
@@ -1878,7 +1879,7 @@ class TestTranscode < Test::Unit::TestCase
     check_both_ways("\u77AC", "\xC0\xFE", 'Big5-HKSCS') # 瞬
     check_both_ways("\u8B96", "\xC6\x40", 'Big5-HKSCS') # 讖
     check_both_ways("\u7C72", "\xC6\x7E", 'Big5-HKSCS') # 籲
-	#assert_raise(Encoding::UndefinedConversionError) { "\xC6\xA1".encode("utf-8", 'Big5-HKSCS') }
+    #assert_raise(Encoding::UndefinedConversionError) { "\xC6\xA1".encode("utf-8", 'Big5-HKSCS') }
     #assert_raise(Encoding::UndefinedConversionError) { "\xC7\x40".encode("utf-8", 'Big5-HKSCS') }
     #assert_raise(Encoding::UndefinedConversionError) { "\xC8\x40".encode("utf-8", 'Big5-HKSCS') }
     check_both_ways("\u4E42", "\xC9\x40", 'Big5-HKSCS') # 乂
@@ -1917,11 +1918,11 @@ class TestTranscode < Test::Unit::TestCase
     #assert_raise(Encoding::UndefinedConversionError) { "\xF9\xD6".encode("utf-8", 'Big5-HKSCS') }
     check_both_ways("\u795E\u6797\u7FA9\u535A", "\xAF\xAB\xAA\x4C\xB8\x71\xB3\xD5", 'Big5-HKSCS') # 神林義博
   end
-  
+
   def test_Big5_UAO
     check_both_ways("\u4e17", "\x81\x40", 'Big5-UAO') # 丗
   end
-  
+
   def test_nothing_changed
     a = "James".force_encoding("US-ASCII")
     b = a.encode("Shift_JIS")

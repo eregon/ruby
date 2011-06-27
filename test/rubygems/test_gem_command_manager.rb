@@ -4,10 +4,10 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems/command_manager'
 
-class TestGemCommandManager < RubyGemTestCase
+class TestGemCommandManager < Gem::TestCase
 
   def setup
     super
@@ -17,11 +17,11 @@ class TestGemCommandManager < RubyGemTestCase
 
   def test_run_interrupt
     old_load_path = $:.dup
-    $: << "test/rubygems"
+    $: << File.expand_path("test/rubygems", @@project_dir)
     Gem.load_env_plugins
 
     use_ui @ui do
-      assert_raises MockGemUi::TermError do
+      assert_raises Gem::MockGemUi::TermError do
         @command_manager.run 'interrupt'
       end
       assert_equal '', ui.output
@@ -29,15 +29,16 @@ class TestGemCommandManager < RubyGemTestCase
     end
   ensure
     $:.replace old_load_path
+    Gem::CommandManager.reset
   end
 
   def test_run_crash_command
     old_load_path = $:.dup
-    $: << "test/rubygems"
+    $: << File.expand_path("test/rubygems", @@project_dir)
 
     @command_manager.register_command :crash
     use_ui @ui do
-      assert_raises MockGemUi::TermError do
+      assert_raises Gem::MockGemUi::TermError do
         @command_manager.run 'crash'
       end
       assert_equal '', ui.output
@@ -46,13 +47,14 @@ class TestGemCommandManager < RubyGemTestCase
     end
   ensure
     $:.replace old_load_path
+    @command_manager.unregister_command :crash
   end
 
   def test_process_args_bad_arg
     use_ui @ui do
-      assert_raises(MockGemUi::TermError) {
+      assert_raises Gem::MockGemUi::TermError do
         @command_manager.process_args("--bad-arg")
-      }
+      end
     end
 
     assert_match(/invalid option: --bad-arg/i, @ui.error)

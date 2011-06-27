@@ -4,10 +4,10 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems/commands/outdated_command'
 
-class TestGemCommandsOutdatedCommand < RubyGemTestCase
+class TestGemCommandsOutdatedCommand < Gem::TestCase
 
   def setup
     super
@@ -20,27 +20,25 @@ class TestGemCommandsOutdatedCommand < RubyGemTestCase
   end
 
   def test_execute
-    quick_gem 'foo', '0.1'
-    quick_gem 'foo', '0.2'
-    remote_10 = quick_gem 'foo', '1.0'
-    remote_20 = quick_gem 'foo', '2.0'
+    remote_10 = quick_spec 'foo', '1.0'
+    remote_20 = quick_spec 'foo', '2.0'
 
-    remote_spec_file = File.join @gemhome, 'specifications', remote_10.spec_name
-    FileUtils.rm remote_spec_file
+    Gem::RemoteFetcher.fetcher = @fetcher = Gem::FakeFetcher.new
 
-    remote_spec_file = File.join @gemhome, 'specifications', remote_20.spec_name
-    FileUtils.rm remote_spec_file
-
-    @fetcher = Gem::FakeFetcher.new
-    Gem::RemoteFetcher.fetcher = @fetcher
-
+    util_clear_gems
     util_setup_spec_fetcher remote_10, remote_20
 
-    use_ui @ui do @cmd.execute end
+    quick_gem 'foo', '0.1'
+    quick_gem 'foo', '0.2'
+
+    Gem::Specification.reset
+
+    use_ui @ui do
+      @cmd.execute
+    end
 
     assert_equal "foo (0.2 < 2.0)\n", @ui.output
     assert_equal "", @ui.error
   end
-
 end
 

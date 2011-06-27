@@ -4,10 +4,10 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require 'rubygems/gem_runner'
 
-class TestGemGemRunner < RubyGemTestCase
+class TestGemGemRunner < Gem::TestCase
 
   def test_do_configuration
     Gem.clear_paths
@@ -39,10 +39,7 @@ class TestGemGemRunner < RubyGemTestCase
   def test_build_args__are_handled
     Gem.clear_paths
 
-    gr = Gem::GemRunner.new
-    assert_raises(Gem::SystemExitException) do
-      gr.run(%W[--help -- --build_arg1 --build_arg2])
-    end
+    Gem::GemRunner.new.run(%W[help -- --build_arg1 --build_arg2])
 
     assert_equal %w[--build_arg1 --build_arg2], Gem::Command.build_args
   end

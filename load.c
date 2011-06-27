@@ -4,25 +4,18 @@
 
 #include "ruby/ruby.h"
 #include "ruby/util.h"
+#include "internal.h"
 #include "dln.h"
 #include "eval_intern.h"
 
 VALUE ruby_dln_librefs;
 
-#if CASEFOLD_FILESYSTEM
-#define fncomp strcasecmp
-#define fnncomp strncasecmp
-#else
-#define fncomp strcmp
-#define fnncomp strncmp
-#endif
-
-#define IS_RBEXT(e) (fncomp((e), ".rb") == 0)
-#define IS_SOEXT(e) (fncomp((e), ".so") == 0 || fncomp((e), ".o") == 0)
+#define IS_RBEXT(e) (strcmp((e), ".rb") == 0)
+#define IS_SOEXT(e) (strcmp((e), ".so") == 0 || strcmp((e), ".o") == 0)
 #ifdef DLEXT2
-#define IS_DLEXT(e) (fncomp((e), DLEXT) == 0 || fncomp((e), DLEXT2) == 0)
+#define IS_DLEXT(e) (strcmp((e), DLEXT) == 0 || strcmp((e), DLEXT2) == 0)
 #else
-#define IS_DLEXT(e) (fncomp((e), DLEXT) == 0)
+#define IS_DLEXT(e) (strcmp((e), DLEXT) == 0)
 #endif
 
 
@@ -48,14 +41,6 @@ rb_get_expanded_load_path(void)
     VALUE ary;
     long i;
 
-    for (i = 0; i < RARRAY_LEN(load_path); ++i) {
-	VALUE str = rb_check_string_type(RARRAY_PTR(load_path)[i]);
-	if (NIL_P(str) || !rb_is_absolute_path(RSTRING_PTR(str)))
-	    goto relative_path_found;
-    }
-    return load_path;
-
-  relative_path_found:
     ary = rb_ary_new2(RARRAY_LEN(load_path));
     for (i = 0; i < RARRAY_LEN(load_path); ++i) {
 	VALUE path = rb_file_expand_path(RARRAY_PTR(load_path)[i], Qnil);
@@ -89,16 +74,27 @@ loaded_feature_path(const char *name, long vlen, const char *feature, long len,
 		    int type, VALUE load_path)
 {
     long i;
+    long plen;
+    const char *e;
 
+    if(vlen < len) return 0;
+    if (!strncmp(name+(vlen-len),feature,len)){
+	plen = vlen - len - 1;
+    } else {
+	for (e = name + vlen; name != e && *e != '.' && *e != '/'; --e);
+	if (*e!='.' ||
+	    e-name < len ||
+	    strncmp(e-len,feature,len) )
+	    return 0;
+	plen = e - name - len - 1;
+    }
     for (i = 0; i < RARRAY_LEN(load_path); ++i) {
 	VALUE p = RARRAY_PTR(load_path)[i];
 	const char *s = StringValuePtr(p);
 	long n = RSTRING_LEN(p);
 
-	if (vlen < n + len + 1) continue;
-	if (n && (fnncomp(name, s, n) || name[n] != '/')) continue;
-	if (fnncomp(name + n + 1, feature, len)) continue;
-	if (name[n+len+1] && name[n+len+1] != '.') continue;
+	if (n != plen ) continue;
+	if (n && (strncmp(name, s, n) || name[n] != '/')) continue;
 	switch (type) {
 	  case 's':
 	    if (IS_DLEXT(&name[n+len+1])) return p;
@@ -159,7 +155,7 @@ rb_feature_p(const char *feature, const char *ext, int rb, int expanded, const c
 	v = RARRAY_PTR(features)[i];
 	f = StringValuePtr(v);
 	if ((n = RSTRING_LEN(v)) < len) continue;
-	if (fnncomp(f, feature, len) != 0) {
+	if (strncmp(f, feature, len) != 0) {
 	    if (expanded) continue;
 	    if (!load_path) load_path = rb_get_expanded_load_path();
 	    if (!(p = loaded_feature_path(f, n, feature, len, type, load_path)))
@@ -272,7 +268,6 @@ rb_provide(const char *feature)
 }
 
 NORETURN(static void load_failed(VALUE));
-VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
 
 static void
 rb_load_internal(VALUE fname, int wrap)
@@ -398,8 +393,7 @@ load_lock(const char *ftptr)
     if (!loading_tbl || !st_lookup(loading_tbl, (st_data_t)ftptr, &data)) {
 	/* loading ruby library should be serialized. */
 	if (!loading_tbl) {
-	    GET_VM()->loading_table = loading_tbl =
-		(CASEFOLD_FILESYSTEM ? st_init_strcasetable() : st_init_strtable());
+	    GET_VM()->loading_table = loading_tbl = st_init_strtable();
 	}
 	/* partial state */
 	ftptr = ruby_strdup(ftptr);
@@ -473,7 +467,6 @@ rb_f_require(VALUE obj, VALUE fname)
 VALUE
 rb_f_require_relative(VALUE obj, VALUE fname)
 {
-    VALUE rb_current_realfilepath(void);
     VALUE base = rb_current_realfilepath();
     if (NIL_P(base)) {
 	rb_raise(rb_eLoadError, "cannot infer basepath");

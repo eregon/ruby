@@ -12,6 +12,7 @@
 #include "ruby/vm.h"
 #include "ruby/st.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 
 #include "gc.h"
 #include "vm_core.h"
@@ -36,7 +37,6 @@ VALUE rb_cThread;
 VALUE rb_cEnv;
 VALUE rb_mRubyVMFrozenCore;
 
-VALUE ruby_vm_global_state_version = 1;
 VALUE ruby_vm_const_missing_count = 0;
 
 char ruby_vm_redefined_flag[BOP_LAST_];
@@ -46,8 +46,6 @@ rb_vm_t *ruby_current_vm = 0;
 
 static void thread_free(void *ptr);
 
-VALUE rb_insns_name_array(void);
-
 void vm_analysis_operand(int insn, int n, VALUE op);
 void vm_analysis_register(int reg, int isset);
 void vm_analysis_insn(int insn);
@@ -56,6 +54,25 @@ void
 rb_vm_change_state(void)
 {
     INC_VM_STATE_VERSION();
+}
+
+static void vm_clear_global_method_cache(void);
+
+static void
+vm_clear_all_inline_method_cache(void)
+{
+    /* TODO: Clear all inline cache entries in all iseqs.
+             How to iterate all iseqs in sweep phase?
+             rb_objspace_each_objects() doesn't work at sweep phase.
+     */
+}
+
+static void
+vm_clear_all_cache()
+{
+    vm_clear_global_method_cache();
+    vm_clear_all_inline_method_cache();
+    ruby_vm_global_state_version = 1;
 }
 
 void
@@ -181,6 +198,19 @@ ruby_vm_at_exit(void (*func)(rb_vm_t *))
     rb_ary_push((VALUE)&GET_VM()->at_exit, (VALUE)func);
 }
 
+static void
+ruby_vm_run_at_exit_hooks(rb_vm_t *vm)
+{
+    VALUE hook = (VALUE)&vm->at_exit;
+
+    while (RARRAY_LEN(hook) > 0) {
+	typedef void rb_vm_at_exit_func(rb_vm_t*);
+	rb_vm_at_exit_func *func = (rb_vm_at_exit_func*)rb_ary_pop(hook);
+	(*func)(vm);
+    }
+    rb_ary_free(hook);
+}
+
 /* Env */
 
 /*
@@ -230,7 +260,7 @@ env_free(void * const ptr)
 {
     RUBY_FREE_ENTER("env");
     if (ptr) {
-	const rb_env_t * const env = ptr;
+	rb_env_t *const env = ptr;
 	RUBY_FREE_UNLESS_NULL(env->env);
 	ruby_xfree(ptr);
     }
@@ -448,7 +478,7 @@ rb_vm_make_env_object(rb_thread_t * th, rb_control_frame_t *cfp)
 }
 
 void
-rb_vm_stack_to_heap(rb_thread_t * const th)
+rb_vm_stack_to_heap(rb_thread_t *th)
 {
     rb_control_frame_t *cfp = th->cfp;
     while ((cfp = rb_vm_get_ruby_level_next_cfp(th, cfp)) != 0) {
@@ -1446,7 +1476,7 @@ rb_thread_current_status(const rb_thread_t *th)
     }
     else if (cfp->me->def->original_id) {
 	str = rb_sprintf("`%s#%s' (cfunc)",
-			 RSTRING_PTR(rb_class_name(cfp->me->klass)),
+			 rb_class2name(cfp->me->klass),
 			 rb_id2name(cfp->me->def->original_id));
     }
 
@@ -1550,6 +1580,7 @@ ruby_vm_destruct(rb_vm_t *vm)
 	    rb_objspace_free(objspace);
 	}
 #endif
+	ruby_vm_run_at_exit_hooks(vm);
 	rb_vm_gvl_destroy(vm);
 	ruby_xfree(vm);
 	ruby_current_vm = 0;
@@ -1629,8 +1660,6 @@ thread_recycle_struct(void)
     return p;
 }
 #endif
-
-void rb_gc_mark_machine_stack(rb_thread_t *th);
 
 void
 rb_thread_mark(void *ptr)
@@ -1747,7 +1776,7 @@ thread_memsize(const void *ptr)
 	    size += th->stack_size * sizeof(VALUE);
 	}
 	if (th->local_storage) {
-	    st_memsize(th->local_storage);
+	    size += st_memsize(th->local_storage);
 	}
 	return size;
     }
@@ -1756,7 +1785,8 @@ thread_memsize(const void *ptr)
     }
 }
 
-static const rb_data_type_t thread_data_type = {
+#define thread_data_type ruby_thread_data_type
+const rb_data_type_t ruby_thread_data_type = {
     "VM/thread",
     {
 	rb_thread_mark,
@@ -1764,6 +1794,17 @@ static const rb_data_type_t thread_data_type = {
 	thread_memsize,
     },
 };
+
+VALUE
+rb_obj_is_thread(VALUE obj)
+{
+    if (rb_typeddata_is_kind_of(obj, &thread_data_type)) {
+	return Qtrue;
+    }
+    else {
+	return Qfalse;
+    }
+}
 
 static VALUE
 thread_alloc(VALUE klass)
@@ -1780,7 +1821,7 @@ thread_alloc(VALUE klass)
 }
 
 static void
-th_init2(rb_thread_t *th, VALUE self)
+th_init(rb_thread_t *th, VALUE self)
 {
     th->self = self;
 
@@ -1796,12 +1837,7 @@ th_init2(rb_thread_t *th, VALUE self)
     th->status = THREAD_RUNNABLE;
     th->errinfo = Qnil;
     th->last_status = Qnil;
-}
-
-static void
-th_init(rb_thread_t *th, VALUE self)
-{
-    th_init2(th, self);
+    th->waiting_fd = -1;
 }
 
 static VALUE
@@ -1826,8 +1862,6 @@ rb_thread_alloc(VALUE klass)
     ruby_thread_init(self);
     return self;
 }
-
-VALUE rb_iseq_clone(VALUE iseqval, VALUE newcbase);
 
 static void
 vm_define_method(rb_thread_t *th, VALUE obj, ID id, VALUE iseqval,
@@ -1933,7 +1967,6 @@ m_core_set_postexe(VALUE self, VALUE iseqval)
 	rb_thread_t *th = GET_THREAD();
 	rb_control_frame_t *cfp = rb_vm_get_ruby_level_next_cfp(th, th->cfp);
 	VALUE proc;
-	extern void rb_call_end_proc(VALUE data);
 
 	GetISeqPtr(iseqval, blockiseq);
 
@@ -2037,10 +2070,6 @@ Init_VM(void)
     rb_ary_push(opts, rb_str_new2("call threaded code"));
 #endif
 
-#if OPT_BASIC_OPERATIONS
-    rb_ary_push(opts, rb_str_new2("optimize basic operation"));
-#endif
-
 #if OPT_STACK_CACHING
     rb_ary_push(opts, rb_str_new2("stack caching"));
 #endif
@@ -2116,9 +2145,6 @@ rb_vm_set_progname(VALUE filename)
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 struct rb_objspace *rb_objspace_alloc(void);
 #endif
-void ruby_thread_init_stack(rb_thread_t *th);
-
-extern void Init_native_thread(void);
 
 void
 Init_BareVM(void)
@@ -2141,7 +2167,7 @@ Init_BareVM(void)
     ruby_current_vm = vm;
 
     Init_native_thread();
-    th_init2(th, 0);
+    th_init(th, 0);
     th->vm = vm;
     ruby_thread_init_stack(th);
 }

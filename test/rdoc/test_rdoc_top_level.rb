@@ -12,7 +12,10 @@ class TestRDocTopLevel < XrefTestCase
 
   def test_class_all_classes_and_modules
     expected = %w[
-      C1 C2 C2::C3 C2::C3::H1 C3 C3::H1 C3::H2 C4 C4::C4 C5 C5::C1 M1 M1::M2
+      C1 C2 C2::C3 C2::C3::H1 C3 C3::H1 C3::H2 C4 C4::C4 C5 C5::C1
+      Child
+      M1 M1::M2
+      Parent
     ]
 
     assert_equal expected,
@@ -22,13 +25,14 @@ class TestRDocTopLevel < XrefTestCase
   def test_class_classes
     expected = %w[
       C1 C2 C2::C3 C2::C3::H1 C3 C3::H1 C3::H2 C4 C4::C4 C5 C5::C1
+      Child Parent
     ]
 
     assert_equal expected, RDoc::TopLevel.classes.map { |m| m.full_name }.sort
   end
 
   def test_class_complete
-    @c2.add_module_alias @c2_c3, 'A1'
+    @c2.add_module_alias @c2_c3, 'A1', @top_level
 
     RDoc::TopLevel.complete :public
 
@@ -77,6 +81,15 @@ class TestRDocTopLevel < XrefTestCase
                  RDoc::TopLevel.modules.map { |m| m.full_name }.sort
   end
 
+  def test_class_new
+    tl1 = RDoc::TopLevel.new 'file.rb'
+    tl2 = RDoc::TopLevel.new 'file.rb'
+    tl3 = RDoc::TopLevel.new 'other.rb'
+
+    assert_same tl1, tl2
+    refute_same tl1, tl3
+  end
+
   def test_class_reset
     RDoc::TopLevel.reset
 
@@ -89,6 +102,24 @@ class TestRDocTopLevel < XrefTestCase
     assert_equal 'top_level.rb', @top_level.base_name
   end
 
+  def test_eql_eh
+    top_level2 = RDoc::TopLevel.new 'path/top_level.rb'
+    other_level = RDoc::TopLevel.new 'path/other_level.rb'
+
+    assert_operator @top_level, :eql?, top_level2
+
+    refute_operator other_level, :eql?, @top_level
+  end
+
+  def test_equals2
+    top_level2 = RDoc::TopLevel.new 'path/top_level.rb'
+    other_level = RDoc::TopLevel.new 'path/other_level.rb'
+
+    assert_equal @top_level, top_level2
+
+    refute_equal other_level, @top_level
+  end
+
   def test_find_class_or_module
     assert_equal @c1,    @xref_data.find_class_or_module('C1')
     assert_equal @c2_c3, @xref_data.find_class_or_module('C2::C3')
@@ -98,6 +129,14 @@ class TestRDocTopLevel < XrefTestCase
 
   def test_full_name
     assert_equal 'path/top_level.rb', @top_level.full_name
+  end
+
+  def test_hash
+    tl2 = RDoc::TopLevel.new 'path/top_level.rb'
+    tl3 = RDoc::TopLevel.new 'other/top_level.rb'
+
+    assert_equal @top_level.hash, tl2.hash
+    refute_equal @top_level.hash, tl3.hash
   end
 
   def test_http_url

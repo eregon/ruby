@@ -154,7 +154,7 @@ class TC_JSON < Test::Unit::TestCase
     assert_equal(@ary,
       parse('[[1],["foo"],[3.14],[47.11e+2],[2718.0E-3],[null],[[1,-2,3]]'\
       ',[false],[true]]'))
-    assert_equal(@ary, parse(%Q{   [   [1] , ["foo"]  ,  [3.14] \t ,  [47.11e+2] 
+    assert_equal(@ary, parse(%Q{   [   [1] , ["foo"]  ,  [3.14] \t ,  [47.11e+2]
       , [2718.0E-3 ],\r[ null] , [[1, -2, 3 ]], [false ],[ true]\n ]  }))
   end
 
@@ -390,5 +390,12 @@ EOT
     assert_equal orig, JSON[json4][0]
     json5 = JSON([orig = 1 << 64])
     assert_equal orig, JSON[json5][0]
+  end
+
+  def test_allocate
+    json = JSON::Parser.new("{}")
+    assert_raises(TypeError, '[ruby-core:35079]') {json.__send__(:initialize, "{}")}
+    json = JSON::Parser.allocate
+    assert_raises(TypeError, '[ruby-core:35079]') {json.source}
   end
 end

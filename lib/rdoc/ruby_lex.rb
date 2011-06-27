@@ -401,13 +401,17 @@ class RDoc::RubyLex
       |op, io|
       @ltype = "="
       res = ''
-      until (ch = getc) == "\n" do res << ch end
-      until peek_equal?("=end") && peek(4) =~ /\s/ do
-        until (ch = getc) == "\n" do res << ch end
+      nil until (ch = getc) == "\n"
+
+      until ( peek_equal?("=end") && peek(4) =~ /\s/ ) do
+        (ch = getc)
+        res << ch
       end
-      res << gets
+
+      gets # consume =end
+
       @ltype = nil
-      Token(TkRD_COMMENT, res)
+      Token(TkCOMMENT, res)
     end
 
     @OP.def_rule("\n") do |op, io|

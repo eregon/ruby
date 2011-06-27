@@ -4,7 +4,7 @@
 
 /* unicode */
 
-static const char digit_values[256] = { 
+static const char digit_values[256] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1,
@@ -40,7 +40,7 @@ static UTF32 unescape_unicode(const unsigned char *p)
     return result;
 }
 
-static int convert_UTF32_to_UTF8(char *buf, UTF32 ch) 
+static int convert_UTF32_to_UTF8(char *buf, UTF32 ch)
 {
     int len = 1;
     if (ch <= 0x7F) {
@@ -109,14 +109,14 @@ static char *JSON_parse_object(JSON_Parser *json, char *p, char *pe, VALUE *resu
 
     *result = NIL_P(object_class) ? rb_hash_new() : rb_class_new_instance(0, 0, object_class);
 
-    
+
 #line 114 "parser.c"
 	{
 	cs = JSON_object_start;
 	}
 
 #line 159 "parser.rl"
-    
+
 #line 121 "parser.c"
 	{
 	if ( p == pe )
@@ -228,7 +228,7 @@ tr11:
 #line 116 "parser.rl"
 	{
         VALUE v = Qnil;
-        char *np = JSON_parse_value(json, p, pe, &v); 
+        char *np = JSON_parse_value(json, p, pe, &v);
         if (np == NULL) {
             p--; {p++; cs = 9; goto _out;}
         } else {
@@ -404,32 +404,32 @@ case 26:
 		goto st2;
 	goto st26;
 	}
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof9: cs = 9; goto _test_eof; 
-	_test_eof10: cs = 10; goto _test_eof; 
-	_test_eof11: cs = 11; goto _test_eof; 
-	_test_eof12: cs = 12; goto _test_eof; 
-	_test_eof13: cs = 13; goto _test_eof; 
-	_test_eof14: cs = 14; goto _test_eof; 
-	_test_eof15: cs = 15; goto _test_eof; 
-	_test_eof16: cs = 16; goto _test_eof; 
-	_test_eof17: cs = 17; goto _test_eof; 
-	_test_eof18: cs = 18; goto _test_eof; 
-	_test_eof27: cs = 27; goto _test_eof; 
-	_test_eof19: cs = 19; goto _test_eof; 
-	_test_eof20: cs = 20; goto _test_eof; 
-	_test_eof21: cs = 21; goto _test_eof; 
-	_test_eof22: cs = 22; goto _test_eof; 
-	_test_eof23: cs = 23; goto _test_eof; 
-	_test_eof24: cs = 24; goto _test_eof; 
-	_test_eof25: cs = 25; goto _test_eof; 
-	_test_eof26: cs = 26; goto _test_eof; 
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof9: cs = 9; goto _test_eof;
+	_test_eof10: cs = 10; goto _test_eof;
+	_test_eof11: cs = 11; goto _test_eof;
+	_test_eof12: cs = 12; goto _test_eof;
+	_test_eof13: cs = 13; goto _test_eof;
+	_test_eof14: cs = 14; goto _test_eof;
+	_test_eof15: cs = 15; goto _test_eof;
+	_test_eof16: cs = 16; goto _test_eof;
+	_test_eof17: cs = 17; goto _test_eof;
+	_test_eof18: cs = 18; goto _test_eof;
+	_test_eof27: cs = 27; goto _test_eof;
+	_test_eof19: cs = 19; goto _test_eof;
+	_test_eof20: cs = 20; goto _test_eof;
+	_test_eof21: cs = 21; goto _test_eof;
+	_test_eof22: cs = 22; goto _test_eof;
+	_test_eof23: cs = 23; goto _test_eof;
+	_test_eof24: cs = 24; goto _test_eof;
+	_test_eof25: cs = 25; goto _test_eof;
+	_test_eof26: cs = 26; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -469,14 +469,14 @@ static char *JSON_parse_value(JSON_Parser *json, char *p, char *pe, VALUE *resul
 {
     int cs = EVIL;
 
-    
+
 #line 474 "parser.c"
 	{
 	cs = JSON_value_start;
 	}
 
 #line 265 "parser.rl"
-    
+
 #line 481 "parser.c"
 	{
 	if ( p == pe )
@@ -530,7 +530,7 @@ tr2:
 	goto st21;
 tr5:
 #line 229 "parser.rl"
-	{ 
+	{
         char *np;
         json->current_nesting++;
         np = JSON_parse_array(json, p, pe, result);
@@ -540,7 +540,7 @@ tr5:
 	goto st21;
 tr9:
 #line 237 "parser.rl"
-	{ 
+	{
         char *np;
         json->current_nesting++;
         np =  JSON_parse_object(json, p, pe, result);
@@ -728,26 +728,26 @@ case 20:
 		goto tr28;
 	goto st0;
 	}
-	_test_eof21: cs = 21; goto _test_eof; 
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof9: cs = 9; goto _test_eof; 
-	_test_eof10: cs = 10; goto _test_eof; 
-	_test_eof11: cs = 11; goto _test_eof; 
-	_test_eof12: cs = 12; goto _test_eof; 
-	_test_eof13: cs = 13; goto _test_eof; 
-	_test_eof14: cs = 14; goto _test_eof; 
-	_test_eof15: cs = 15; goto _test_eof; 
-	_test_eof16: cs = 16; goto _test_eof; 
-	_test_eof17: cs = 17; goto _test_eof; 
-	_test_eof18: cs = 18; goto _test_eof; 
-	_test_eof19: cs = 19; goto _test_eof; 
-	_test_eof20: cs = 20; goto _test_eof; 
+	_test_eof21: cs = 21; goto _test_eof;
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof9: cs = 9; goto _test_eof;
+	_test_eof10: cs = 10; goto _test_eof;
+	_test_eof11: cs = 11; goto _test_eof;
+	_test_eof12: cs = 12; goto _test_eof;
+	_test_eof13: cs = 13; goto _test_eof;
+	_test_eof14: cs = 14; goto _test_eof;
+	_test_eof15: cs = 15; goto _test_eof;
+	_test_eof16: cs = 16; goto _test_eof;
+	_test_eof17: cs = 17; goto _test_eof;
+	_test_eof18: cs = 18; goto _test_eof;
+	_test_eof19: cs = 19; goto _test_eof;
+	_test_eof20: cs = 20; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -778,7 +778,7 @@ static char *JSON_parse_integer(JSON_Parser *json, char *p, char *pe, VALUE *res
 {
     int cs = EVIL;
 
-    
+
 #line 783 "parser.c"
 	{
 	cs = JSON_integer_start;
@@ -786,7 +786,7 @@ static char *JSON_parse_integer(JSON_Parser *json, char *p, char *pe, VALUE *res
 
 #line 289 "parser.rl"
     json->memo = p;
-    
+
 #line 791 "parser.c"
 	{
 	if ( p == pe )
@@ -838,10 +838,10 @@ case 4:
 		goto st4;
 	goto tr4;
 	}
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -874,7 +874,7 @@ static char *JSON_parse_float(JSON_Parser *json, char *p, char *pe, VALUE *resul
 {
     int cs = EVIL;
 
-    
+
 #line 879 "parser.c"
 	{
 	cs = JSON_float_start;
@@ -882,7 +882,7 @@ static char *JSON_parse_float(JSON_Parser *json, char *p, char *pe, VALUE *resul
 
 #line 320 "parser.rl"
     json->memo = p;
-    
+
 #line 887 "parser.c"
 	{
 	if ( p == pe )
@@ -995,15 +995,15 @@ case 9:
 		goto st9;
 	goto st0;
 	}
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof10: cs = 10; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof9: cs = 9; goto _test_eof; 
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof10: cs = 10; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof9: cs = 9; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -1043,14 +1043,14 @@ static char *JSON_parse_array(JSON_Parser *json, char *p, char *pe, VALUE *resul
     }
     *result = NIL_P(array_class) ? rb_ary_new() : rb_class_new_instance(0, 0, array_class);
 
-    
+
 #line 1048 "parser.c"
 	{
 	cs = JSON_array_start;
 	}
 
 #line 371 "parser.rl"
-    
+
 #line 1055 "parser.c"
 	{
 	if ( p == pe )
@@ -1093,7 +1093,7 @@ tr2:
 #line 339 "parser.rl"
 	{
         VALUE v = Qnil;
-        char *np = JSON_parse_value(json, p, pe, &v); 
+        char *np = JSON_parse_value(json, p, pe, &v);
         if (np == NULL) {
             p--; {p++; cs = 3; goto _out;}
         } else {
@@ -1248,22 +1248,22 @@ case 16:
 		goto st2;
 	goto st16;
 	}
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof9: cs = 9; goto _test_eof; 
-	_test_eof10: cs = 10; goto _test_eof; 
-	_test_eof11: cs = 11; goto _test_eof; 
-	_test_eof12: cs = 12; goto _test_eof; 
-	_test_eof17: cs = 17; goto _test_eof; 
-	_test_eof13: cs = 13; goto _test_eof; 
-	_test_eof14: cs = 14; goto _test_eof; 
-	_test_eof15: cs = 15; goto _test_eof; 
-	_test_eof16: cs = 16; goto _test_eof; 
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof9: cs = 9; goto _test_eof;
+	_test_eof10: cs = 10; goto _test_eof;
+	_test_eof11: cs = 11; goto _test_eof;
+	_test_eof12: cs = 12; goto _test_eof;
+	_test_eof17: cs = 17; goto _test_eof;
+	_test_eof13: cs = 13; goto _test_eof;
+	_test_eof14: cs = 14; goto _test_eof;
+	_test_eof15: cs = 15; goto _test_eof;
+	_test_eof16: cs = 16; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -1312,7 +1312,7 @@ static VALUE json_string_unescape(VALUE result, char *string, char *stringEnd)
                     unescape = (char *) "\f";
                     break;
                 case 'u':
-                    if (pe > stringEnd - 4) { 
+                    if (pe > stringEnd - 4) {
                         return Qnil;
                     } else {
                         char buf[4];
@@ -1366,7 +1366,7 @@ static char *JSON_parse_string(JSON_Parser *json, char *p, char *pe, VALUE *resu
     int cs = EVIL;
 
     *result = rb_str_buf_new(0);
-    
+
 #line 1371 "parser.c"
 	{
 	cs = JSON_string_start;
@@ -1374,7 +1374,7 @@ static char *JSON_parse_string(JSON_Parser *json, char *p, char *pe, VALUE *resu
 
 #line 479 "parser.rl"
     json->memo = p;
-    
+
 #line 1379 "parser.c"
 	{
 	if ( p == pe )
@@ -1482,13 +1482,13 @@ case 7:
 		goto st2;
 	goto st0;
 	}
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
@@ -1519,7 +1519,7 @@ static const int JSON_en_main = 1;
 #line 518 "parser.rl"
 
 
-/* 
+/*
  * Document-class: JSON::Ext::Parser
  *
  * This is the JSON parser implemented as a C extension. It can be configured
@@ -1610,7 +1610,11 @@ static VALUE cParser_initialize(int argc, VALUE *argv, VALUE self)
     char *ptr;
     long len;
     VALUE source, opts;
-    GET_PARSER;
+    GET_PARSER_INIT;
+
+    if (json->Vsource) {
+        rb_raise(rb_eTypeError, "already initialized instance");
+    }
     rb_scan_args(argc, argv, "11", &source, &opts);
     source = convert_encoding(StringValue(source));
     ptr = RSTRING_PTR(source);
@@ -1697,17 +1701,17 @@ static VALUE cParser_parse(VALUE self)
     VALUE result = Qnil;
     GET_PARSER;
 
-    
-#line 1702 "parser.c"
+
+#line 1706 "parser.c"
 	{
 	cs = JSON_start;
 	}
 
-#line 699 "parser.rl"
+#line 703 "parser.rl"
     p = json->source;
     pe = p + json->len;
-    
-#line 1711 "parser.c"
+
+#line 1715 "parser.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
@@ -1784,7 +1788,7 @@ st10:
 	if ( ++p == pe )
 		goto _test_eof10;
 case 10:
-#line 1788 "parser.c"
+#line 1792 "parser.c"
 	switch( (*p) ) {
 		case 13: goto st10;
 		case 32: goto st10;
@@ -1826,22 +1830,22 @@ case 9:
 		goto st10;
 	goto st9;
 	}
-	_test_eof1: cs = 1; goto _test_eof; 
-	_test_eof2: cs = 2; goto _test_eof; 
-	_test_eof3: cs = 3; goto _test_eof; 
-	_test_eof4: cs = 4; goto _test_eof; 
-	_test_eof5: cs = 5; goto _test_eof; 
-	_test_eof10: cs = 10; goto _test_eof; 
-	_test_eof6: cs = 6; goto _test_eof; 
-	_test_eof7: cs = 7; goto _test_eof; 
-	_test_eof8: cs = 8; goto _test_eof; 
-	_test_eof9: cs = 9; goto _test_eof; 
+	_test_eof1: cs = 1; goto _test_eof;
+	_test_eof2: cs = 2; goto _test_eof;
+	_test_eof3: cs = 3; goto _test_eof;
+	_test_eof4: cs = 4; goto _test_eof;
+	_test_eof5: cs = 5; goto _test_eof;
+	_test_eof10: cs = 10; goto _test_eof;
+	_test_eof6: cs = 6; goto _test_eof;
+	_test_eof7: cs = 7; goto _test_eof;
+	_test_eof8: cs = 8; goto _test_eof;
+	_test_eof9: cs = 9; goto _test_eof;
 
 	_test_eof: {}
 	_out: {}
 	}
 
-#line 702 "parser.rl"
+#line 706 "parser.rl"
 
     if (cs >= JSON_first_final && p == pe) {
         return result;
@@ -1933,3 +1937,11 @@ void Init_parser()
     i_iconv = rb_intern("iconv");
 #endif
 }
+
+/*
+ * Local variables:
+ * mode: c
+ * c-file-style: ruby
+ * indent-tabs-mode: nil
+ * End:
+ */

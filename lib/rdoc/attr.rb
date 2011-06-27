@@ -6,7 +6,7 @@ require 'rdoc/method_attr'
 
 class RDoc::Attr < RDoc::MethodAttr
 
-  MARSHAL_VERSION = 1 # :nodoc:
+  MARSHAL_VERSION = 2 # :nodoc:
 
   ##
   # Is the attribute readable ('R'), writable ('W') or both ('RW')?
@@ -68,6 +68,19 @@ class RDoc::Attr < RDoc::MethodAttr
     end
   end
 
+  def inspect # :nodoc:
+    alias_for = @is_alias_for ? " (alias for #{@is_alias_for.name})" : nil
+    visibility = self.visibility
+    visibility = "forced #{visibility}" if force_documentation
+    "#<%s:0x%x %s %s (%s)%s>" % [
+      self.class, object_id,
+      full_name,
+      rw,
+      visibility,
+      alias_for,
+    ]
+  end
+
   ##
   # Dumps this Attr for use by ri.  See also #marshal_load
 
@@ -79,6 +92,7 @@ class RDoc::Attr < RDoc::MethodAttr
       @visibility,
       parse(@comment),
       singleton,
+      @file.absolute_name,
     ]
   end
 
@@ -90,6 +104,7 @@ class RDoc::Attr < RDoc::MethodAttr
   # * #parent_name
 
   def marshal_load array
+    version     = array[0]
     @name       = array[1]
     @full_name  = array[2]
     @rw         = array[3]
@@ -97,7 +112,20 @@ class RDoc::Attr < RDoc::MethodAttr
     @comment    = array[5]
     @singleton  = array[6] || false # MARSHAL_VERSION == 0
 
+    @file = RDoc::TopLevel.new array[7] if version > 1
+
     @parent_name = @full_name
+  end
+
+  def pretty_print q # :nodoc:
+    q.group 2, "[#{self.class.name} #{full_name} #{rw} #{visibility}", "]" do
+      unless comment.empty? then
+        q.breakable
+        q.text "comment:"
+        q.breakable
+        q.pp @comment
+      end
+    end
   end
 
   def to_s # :nodoc:

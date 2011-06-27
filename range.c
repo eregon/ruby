@@ -11,11 +11,10 @@
 
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 
 VALUE rb_cRange;
 static ID id_cmp, id_succ, id_beg, id_end, id_excl;
-
-extern VALUE rb_struct_init_copy(VALUE copy, VALUE s);
 
 #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
 #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
@@ -305,8 +304,6 @@ step_i(VALUE i, void *arg)
     }
     return Qnil;
 }
-
-extern int ruby_float_step(VALUE from, VALUE to, VALUE step, int excl);
 
 static int
 discrete_object_p(VALUE obj)
@@ -603,8 +600,6 @@ range_first(int argc, VALUE *argv, VALUE range)
 static VALUE
 range_last(int argc, VALUE *argv, VALUE range)
 {
-    VALUE rb_ary_last(int, VALUE *, VALUE);
-
     if (argc == 0) return RANGE_END(range);
     return rb_ary_last(argc, argv, rb_Array(range));
 }

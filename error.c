@@ -12,6 +12,7 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include "vm_core.h"
 
 #include <stdio.h>
@@ -230,8 +231,6 @@ rb_warn_m(VALUE self, VALUE mesg)
     return Qnil;
 }
 
-void rb_vm_bugreport(void);
-
 static void
 report_bug(const char *file, int line, const char *fmt, va_list args)
 {
@@ -356,7 +355,8 @@ rb_check_type(VALUE x, int t)
 		    etype = "Symbol";
 		}
 		else if (rb_special_const_p(x)) {
-		    etype = RSTRING_PTR(rb_obj_as_string(x));
+		    x = rb_obj_as_string(x);
+		    etype = StringValuePtr(x);
 		}
 		else {
 		    etype = rb_obj_classname(x);

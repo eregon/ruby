@@ -27,6 +27,18 @@ extern "C" {
 #include <stdio_ext.h>
 #endif
 
+#include "ruby/config.h"
+#if defined(HAVE_POLL)
+#  include <poll.h>
+#  define RB_WAITFD_IN  POLLIN
+#  define RB_WAITFD_PRI POLLPRI
+#  define RB_WAITFD_OUT POLLOUT
+#else
+#  define RB_WAITFD_IN  0x001
+#  define RB_WAITFD_PRI 0x002
+#  define RB_WAITFD_OUT 0x004
+#endif
+
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility push(default)
 #endif
@@ -110,35 +122,35 @@ typedef struct rb_io_t {
 	rb_io_fptr_finalize(RFILE(obj)->fptr);\
 	RFILE(obj)->fptr = 0;\
     }\
-    fp = 0;\
+    (fp) = 0;\
     RB_IO_FPTR_NEW(fp);\
-    RFILE(obj)->fptr = fp;\
+    RFILE(obj)->fptr = (fp);\
 } while (0)
 
 #define RB_IO_FPTR_NEW(fp) do {\
-    fp = ALLOC(rb_io_t);\
-    fp->fd = -1;\
-    fp->stdio_file = NULL;\
-    fp->mode = 0;\
-    fp->pid = 0;\
-    fp->lineno = 0;\
-    fp->pathv = Qnil;\
-    fp->finalize = 0;\
-    RB_IO_BUFFER_INIT(fp->wbuf);\
-    RB_IO_BUFFER_INIT(fp->rbuf);\
-    RB_IO_BUFFER_INIT(fp->cbuf);\
-    fp->readconv = NULL;\
-    fp->writeconv = NULL;\
-    fp->writeconv_asciicompat = Qnil;\
-    fp->writeconv_pre_ecflags = 0;\
-    fp->writeconv_pre_ecopts = Qnil;\
-    fp->writeconv_initialized = 0;\
-    fp->tied_io_for_writing = 0;\
-    fp->encs.enc = NULL;\
-    fp->encs.enc2 = NULL;\
-    fp->encs.ecflags = 0;\
-    fp->encs.ecopts = Qnil;\
-    fp->write_lock = 0;\
+    (fp) = ALLOC(rb_io_t);\
+    (fp)->fd = -1;\
+    (fp)->stdio_file = NULL;\
+    (fp)->mode = 0;\
+    (fp)->pid = 0;\
+    (fp)->lineno = 0;\
+    (fp)->pathv = Qnil;\
+    (fp)->finalize = 0;\
+    RB_IO_BUFFER_INIT((fp)->wbuf);\
+    RB_IO_BUFFER_INIT((fp)->rbuf);\
+    RB_IO_BUFFER_INIT((fp)->cbuf);\
+    (fp)->readconv = NULL;\
+    (fp)->writeconv = NULL;\
+    (fp)->writeconv_asciicompat = Qnil;\
+    (fp)->writeconv_pre_ecflags = 0;\
+    (fp)->writeconv_pre_ecopts = Qnil;\
+    (fp)->writeconv_initialized = 0;\
+    (fp)->tied_io_for_writing = 0;\
+    (fp)->encs.enc = NULL;\
+    (fp)->encs.enc2 = NULL;\
+    (fp)->encs.ecflags = 0;\
+    (fp)->encs.ecopts = Qnil;\
+    (fp)->write_lock = 0;\
 } while (0)
 
 FILE *rb_io_stdio_file(rb_io_t *fptr);
@@ -160,6 +172,7 @@ VALUE rb_io_get_write_io(VALUE io);
 VALUE rb_io_set_write_io(VALUE io, VALUE w);
 int rb_io_wait_readable(int);
 int rb_io_wait_writable(int);
+int rb_wait_for_single_fd(int fd, int events, struct timeval *tv);
 void rb_io_set_nonblock(rb_io_t *fptr);
 int rb_io_extract_encoding_option(VALUE opt, rb_encoding **enc_p, rb_encoding **enc2_p, int *fmode_p);
 ssize_t rb_io_bufwrite(VALUE io, const void *buf, size_t size);

@@ -1,6 +1,7 @@
 require 'test/unit'
 require 'tmpdir'
 require 'pathname'
+require 'timeout'
 require_relative 'envutil'
 require 'rbconfig'
 
@@ -384,16 +385,20 @@ class TestProcess < Test::Unit::TestCase
       Process.wait Process.spawn(*ECHO["c"], STDERR=>STDOUT, STDOUT=>["out", File::WRONLY|File::CREAT|File::TRUNC, 0644])
       assert_equal("c", File.read("out").chomp)
       File.open("out", "w") {|f|
-        Process.wait Process.spawn(*ECHO["d"], f=>STDOUT, STDOUT=>f)
+        Process.wait Process.spawn(*ECHO["d"], STDOUT=>f)
         assert_equal("d", File.read("out").chomp)
       }
-      Process.wait Process.spawn(*ECHO["e"], STDOUT=>["out", File::WRONLY|File::CREAT|File::TRUNC, 0644],
-                                 3=>STDOUT, 4=>STDOUT, 5=>STDOUT, 6=>STDOUT, 7=>STDOUT)
+      opts = {STDOUT=>["out", File::WRONLY|File::CREAT|File::TRUNC, 0644]}
+      if /mswin|mingw/ !~ RUBY_PLATFORM
+        opts.merge(3=>STDOUT, 4=>STDOUT, 5=>STDOUT, 6=>STDOUT, 7=>STDOUT)
+      end
+      Process.wait Process.spawn(*ECHO["e"], opts)
       assert_equal("e", File.read("out").chomp)
-      Process.wait Process.spawn(*ECHO["ee"], STDOUT=>["out", File::WRONLY|File::CREAT|File::TRUNC, 0644],
-                                 3=>0, 4=>:in, 5=>STDIN,
-                                 6=>1, 7=>:out, 8=>STDOUT,
-                                 9=>2, 10=>:err, 11=>STDERR)
+      opts = {STDOUT=>["out", File::WRONLY|File::CREAT|File::TRUNC, 0644]}
+      if /mswin|mingw/ !~ RUBY_PLATFORM
+        opts.merge(3=>0, 4=>:in, 5=>STDIN, 6=>1, 7=>:out, 8=>STDOUT, 9=>2, 10=>:err, 11=>STDERR)
+      end
+      Process.wait Process.spawn(*ECHO["ee"], opts)
       assert_equal("ee", File.read("out").chomp)
       if /mswin|mingw/ !~ RUBY_PLATFORM
         # passing non-stdio fds is not supported on Windows
@@ -1154,6 +1159,7 @@ class TestProcess < Test::Unit::TestCase
 
   def test_maxgroups
     assert_kind_of(Integer, Process.maxgroups)
+  rescue NotImplementedError
   end
 
   def test_geteuid
@@ -1185,6 +1191,9 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_wait_and_sigchild
+    if /freebsd/ =~ RUBY_PLATFORM
+      skip "this randomly fails on FreeBSD"
+    end
     signal_received = []
     Signal.trap(:CHLD)  { signal_received << true }
     pid = fork { sleep 0.1; exit }
@@ -1201,9 +1210,6 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_no_curdir
-    if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
-      skip "removing current directory is not supported"
-    end
     with_tmpchdir {|d|
       Dir.mkdir("vd")
       status = nil
@@ -1216,7 +1222,7 @@ class TestProcess < Test::Unit::TestCase
       }
       assert(status.success?, "[ruby-dev:38105]")
     }
-  end
+  end unless /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
 
   def test_fallback_to_sh
     feature = '[ruby-core:32745]'
@@ -1231,4 +1237,89 @@ class TestProcess < Test::Unit::TestCase
       assert_equal("2: a b c\n", result, feature)
     end
   end if File.executable?("/bin/sh")
+
+  def test_too_long_path
+    bug4314 = '[ruby-core:34842]'
+    exs = [Errno::ENOENT]
+    exs << Errno::E2BIG if defined?(Errno::E2BIG)
+    assert_raise(*exs, bug4314) {Process.spawn("a" * 10_000_000)}
+  end
+
+  def test_too_long_path2
+    bug4315 = '[ruby-core:34833]'
+    exs = [Errno::ENOENT]
+    exs << Errno::E2BIG if defined?(Errno::E2BIG)
+    assert_raise(*exs, bug4315) {Process.spawn('"a"|'*10_000_000)}
+  end
+
+  def test_system_sigpipe
+    return if /mswin|mingw/ =~ RUBY_PLATFORM
+
+    pid = 0
+
+    with_tmpchdir do
+      assert_nothing_raised('[ruby-dev:12261]') do
+        timeout(3) do
+          pid = spawn('yes | ls')
+          Process.waitpid pid
+        end
+      end
+    end
+  ensure
+    Process.kill(:KILL, pid) if (pid != 0) rescue false
+  end
+
+  if Process.respond_to?(:daemon)
+    def test_daemon_default
+      data = IO.popen("-", "r+") do |f|
+        break f.read if f
+        Process.daemon
+        puts "ng"
+      end
+      assert_equal("", data)
+    end
+
+    def test_daemon_noclose
+      data = IO.popen("-", "r+") do |f|
+        break f.read if f
+        Process.daemon(false, true)
+        puts "ok", Dir.pwd
+      end
+      assert_equal("ok\n/\n", data)
+    end
+
+    def test_daemon_nochdir_noclose
+      data = IO.popen("-", "r+") do |f|
+        break f.read if f
+        Process.daemon(true, true)
+        puts "ok", Dir.pwd
+      end
+      assert_equal("ok\n#{Dir.pwd}\n", data)
+    end
+
+    def test_daemon_readwrite
+      data = IO.popen("-", "r+") do |f|
+        if f
+          f.puts "ok?"
+          break f.read
+        end
+        Process.daemon(true, true)
+        puts STDIN.gets
+      end
+      assert_equal("ok?\n", data)
+    end
+
+    if File.directory?("/proc/self/task")
+      def test_daemon_no_threads
+        pid, data = IO.popen("-", "r+") do |f|
+          break f.pid, f.readlines if f
+          Process.daemon(true, true)
+          puts Dir.entries("/proc/self/task") - %W[. ..]
+        end
+        bug4920 = '[ruby-dev:43873]'
+        assert_equal(2, data.size, bug4920)
+        assert_not_include(data.map(&:to_i), pid)
+      end
+    end
+  end
 end

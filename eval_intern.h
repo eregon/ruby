@@ -91,6 +91,7 @@ NORETURN(void _longjmp(jmp_buf, int));
 */
 #ifdef HAVE_SELECT_LARGE_FDSET
 #define select(n, r, w, e, t) select_large_fdset((n), (r), (w), (e), (t))
+extern int select_large_fdset(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 #endif
 
 #ifdef HAVE_SYS_PARAM_H
@@ -134,6 +135,8 @@ NORETURN(void _longjmp(jmp_buf, int));
 } while (0)
 
 #define JUMP_TAG(st) TH_JUMP_TAG(GET_THREAD(), (st))
+
+#define INTERNAL_EXCEPTION_P(exc) FIXNUM_P(exc)
 
 enum ruby_tag_type {
     RUBY_TAG_RETURN	= 0x1,

@@ -16,139 +16,144 @@
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/resource.h>
 #endif
+#ifdef HAVE_THR_STKSEGMENT
+#include <thread.h>
+#endif
+#if HAVE_FCNTL_H
+#include <fcntl.h>
+#elif HAVE_SYS_FCNTL_H
+#include <sys/fcntl.h>
+#endif
 
 static void native_mutex_lock(pthread_mutex_t *lock);
 static void native_mutex_unlock(pthread_mutex_t *lock);
 static int native_mutex_trylock(pthread_mutex_t *lock);
 static void native_mutex_initialize(pthread_mutex_t *lock);
 static void native_mutex_destroy(pthread_mutex_t *lock);
+static void native_cond_signal(rb_thread_cond_t *cond);
+static void native_cond_broadcast(rb_thread_cond_t *cond);
+static void native_cond_wait(rb_thread_cond_t *cond, pthread_mutex_t *mutex);
+static void native_cond_initialize(rb_thread_cond_t *cond, int flags);
+static void native_cond_destroy(rb_thread_cond_t *cond);
 
-static void native_cond_signal(pthread_cond_t *cond);
-static void native_cond_broadcast(pthread_cond_t *cond);
-static void native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
-static void native_cond_initialize(pthread_cond_t *cond);
-static void native_cond_destroy(pthread_cond_t *cond);
+#define RB_CONDATTR_CLOCK_MONOTONIC 1
 
-#define native_mutex_reinitialize_atfork(lock) (\
-	native_mutex_unlock(lock), \
-	native_mutex_initialize(lock), \
-	native_mutex_lock(lock))
-
-#define GVL_SIMPLE_LOCK 0
-#define GVL_DEBUG 0
-
-static void
-gvl_show_waiting_threads(rb_vm_t *vm)
-{
-    rb_thread_t *th = vm->gvl.waiting_threads;
-    int i = 0;
-    while (th) {
-	fprintf(stderr, "waiting (%d): %p\n", i++, th);
-	th = th->native_thread_data.gvl_next;
-    }
-}
-
-#if !GVL_SIMPLE_LOCK
-static void
-gvl_waiting_push(rb_vm_t *vm, rb_thread_t *th)
-{
-    th->native_thread_data.gvl_next = 0;
-
-    if (vm->gvl.waiting_threads) {
-	vm->gvl.waiting_last_thread->native_thread_data.gvl_next = th;
-	vm->gvl.waiting_last_thread = th;
-    }
-    else {
-	vm->gvl.waiting_threads = th;
-	vm->gvl.waiting_last_thread = th;
-    }
-    th = vm->gvl.waiting_threads;
-    vm->gvl.waiting++;
-}
-
-static void
-gvl_waiting_shift(rb_vm_t *vm, rb_thread_t *th)
-{
-    vm->gvl.waiting_threads = vm->gvl.waiting_threads->native_thread_data.gvl_next;
-    vm->gvl.waiting--;
-}
+#if defined(HAVE_PTHREAD_CONDATTR_SETCLOCK) && defined(HAVE_CLOCKID_T) && \
+    defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) && defined(HAVE_CLOCK_GETTIME)
+#define USE_MONOTONIC_COND 1
+#else
+#define USE_MONOTONIC_COND 0
 #endif
+
+static void
+gvl_acquire_common(rb_vm_t *vm)
+{
+    if (vm->gvl.acquired) {
+
+	vm->gvl.waiting++;
+	if (vm->gvl.waiting == 1) {
+	    /* transit to polling mode */
+	    rb_thread_wakeup_timer_thread();
+	}
+
+	while (vm->gvl.acquired) {
+	    native_cond_wait(&vm->gvl.cond, &vm->gvl.lock);
+	}
+
+	vm->gvl.waiting--;
+
+	if (vm->gvl.need_yield) {
+	    vm->gvl.need_yield = 0;
+	    native_cond_signal(&vm->gvl.switch_cond);
+	}
+    }
+
+    vm->gvl.acquired = 1;
+}
 
 static void
 gvl_acquire(rb_vm_t *vm, rb_thread_t *th)
 {
-#if GVL_SIMPLE_LOCK
     native_mutex_lock(&vm->gvl.lock);
-#else
-    native_mutex_lock(&vm->gvl.lock);
-    if (vm->gvl.waiting > 0 || vm->gvl.acquired != 0) {
-	if (GVL_DEBUG) fprintf(stderr, "gvl acquire (%p): sleep\n", th);
-	gvl_waiting_push(vm, th);
-        if (GVL_DEBUG) gvl_show_waiting_threads(vm);
-
-	while (vm->gvl.acquired != 0 || vm->gvl.waiting_threads != th) {
-	    native_cond_wait(&th->native_thread_data.gvl_cond, &vm->gvl.lock);
-	}
-	gvl_waiting_shift(vm, th);
-    }
-    else {
-	/* do nothing */
-    }
-    vm->gvl.acquired = 1;
+    gvl_acquire_common(vm);
     native_mutex_unlock(&vm->gvl.lock);
-#endif
-    if (GVL_DEBUG) gvl_show_waiting_threads(vm);
-    if (GVL_DEBUG) fprintf(stderr, "gvl acquire (%p): acquire\n", th);
+}
+
+static void
+gvl_release_common(rb_vm_t *vm)
+{
+    vm->gvl.acquired = 0;
+    if (vm->gvl.waiting > 0)
+	native_cond_signal(&vm->gvl.cond);
 }
 
 static void
 gvl_release(rb_vm_t *vm)
 {
-#if GVL_SIMPLE_LOCK
-    native_mutex_unlock(&vm->gvl.lock);
-#else
     native_mutex_lock(&vm->gvl.lock);
-    if (vm->gvl.waiting > 0) {
-	rb_thread_t *th = vm->gvl.waiting_threads;
-	if (GVL_DEBUG) fprintf(stderr, "gvl release (%p): wakeup: %p\n", GET_THREAD(), th);
-	native_cond_signal(&th->native_thread_data.gvl_cond);
+    gvl_release_common(vm);
+    native_mutex_unlock(&vm->gvl.lock);
+}
+
+static void
+gvl_yield(rb_vm_t *vm, rb_thread_t *th)
+{
+    native_mutex_lock(&vm->gvl.lock);
+
+    gvl_release_common(vm);
+
+    /* An another thread is processing GVL yield. */
+    if (UNLIKELY(vm->gvl.wait_yield)) {
+	while (vm->gvl.wait_yield)
+	    native_cond_wait(&vm->gvl.switch_wait_cond, &vm->gvl.lock);
+	goto acquire;
+    }
+
+    vm->gvl.wait_yield = 1;
+
+    if (vm->gvl.waiting > 0)
+	vm->gvl.need_yield = 1;
+
+    if (vm->gvl.need_yield) {
+	/* Wait until another thread task take GVL. */
+	while (vm->gvl.need_yield) {
+	    native_cond_wait(&vm->gvl.switch_cond, &vm->gvl.lock);
+	}
     }
     else {
-	if (GVL_DEBUG) fprintf(stderr, "gvl release (%p): wakeup: %p\n", GET_THREAD(), NULL);
-	/* do nothing */
+	native_mutex_unlock(&vm->gvl.lock);
+	sched_yield();
+	native_mutex_lock(&vm->gvl.lock);
     }
-    vm->gvl.acquired = 0;
+
+    vm->gvl.wait_yield = 0;
+    native_cond_broadcast(&vm->gvl.switch_wait_cond);
+  acquire:
+    gvl_acquire_common(vm);
     native_mutex_unlock(&vm->gvl.lock);
-#endif
 }
 
 static void
 gvl_init(rb_vm_t *vm)
 {
-    if (GVL_DEBUG) fprintf(stderr, "gvl init\n");
-
-#if GVL_SIMPLE_LOCK
-    native_mutex_reinitialize_atfork(&vm->gvl.lock);
-#else
     native_mutex_initialize(&vm->gvl.lock);
-    vm->gvl.waiting_threads = 0;
-    vm->gvl.waiting_last_thread = 0;
-    vm->gvl.waiting = 0;
+    native_cond_initialize(&vm->gvl.cond, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&vm->gvl.switch_cond, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&vm->gvl.switch_wait_cond, RB_CONDATTR_CLOCK_MONOTONIC);
     vm->gvl.acquired = 0;
-#endif
+    vm->gvl.waiting = 0;
+    vm->gvl.need_yield = 0;
 }
 
 static void
 gvl_destroy(rb_vm_t *vm)
 {
-    if (GVL_DEBUG) fprintf(stderr, "gvl destroy\n");
     native_mutex_destroy(&vm->gvl.lock);
 }
 
 static void
 gvl_atfork(rb_vm_t *vm)
 {
-    if (GVL_DEBUG) fprintf(stderr, "gvl atfork\n");
     gvl_init(vm);
     gvl_acquire(vm, GET_THREAD());
 }
@@ -163,7 +168,7 @@ mutex_debug(const char *msg, pthread_mutex_t *lock)
 	static pthread_mutex_t dbglock = PTHREAD_MUTEX_INITIALIZER;
 
 	if ((r = pthread_mutex_lock(&dbglock)) != 0) {exit(1);}
-	fprintf(stdout, "%s: %p\n", msg, lock);
+	fprintf(stdout, "%s: %p\n", msg, (void *)lock);
 	if ((r = pthread_mutex_unlock(&dbglock)) != 0) {exit(1);}
     }
 }
@@ -225,58 +230,144 @@ native_mutex_destroy(pthread_mutex_t *lock)
 }
 
 static void
-native_cond_initialize(pthread_cond_t *cond)
+native_cond_initialize(rb_thread_cond_t *cond, int flags)
 {
-    int r = pthread_cond_init(cond, 0);
+    int r;
+    pthread_condattr_t attr;
+
+    pthread_condattr_init(&attr);
+
+#if USE_MONOTONIC_COND
+    cond->clockid = CLOCK_REALTIME;
+    if (flags & RB_CONDATTR_CLOCK_MONOTONIC) {
+	r = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+	if (r == 0) {
+	    cond->clockid = CLOCK_MONOTONIC;
+	}
+    }
+#endif
+
+    r = pthread_cond_init(&cond->cond, &attr);
     if (r != 0) {
 	rb_bug_errno("pthread_cond_init", r);
     }
-}
+
+    return;
+ }
 
 static void
-native_cond_destroy(pthread_cond_t *cond)
+native_cond_destroy(rb_thread_cond_t *cond)
 {
-    int r = pthread_cond_destroy(cond);
+    int r = pthread_cond_destroy(&cond->cond);
     if (r != 0) {
 	rb_bug_errno("pthread_cond_destroy", r);
     }
 }
 
 static void
-native_cond_signal(pthread_cond_t *cond)
+native_cond_signal(rb_thread_cond_t *cond)
 {
-    int r = pthread_cond_signal(cond);
+    int r = pthread_cond_signal(&cond->cond);
     if (r != 0) {
 	rb_bug_errno("pthread_cond_signal", r);
     }
 }
 
 static void
-native_cond_broadcast(pthread_cond_t *cond)
+native_cond_broadcast(rb_thread_cond_t *cond)
 {
-    int r = pthread_cond_broadcast(cond);
+    int r = pthread_cond_broadcast(&cond->cond);
     if (r != 0) {
 	rb_bug_errno("native_cond_broadcast", r);
     }
 }
 
 static void
-native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
+native_cond_wait(rb_thread_cond_t *cond, pthread_mutex_t *mutex)
 {
-    int r = pthread_cond_wait(cond, mutex);
+    int r = pthread_cond_wait(&cond->cond, mutex);
     if (r != 0) {
 	rb_bug_errno("pthread_cond_wait", r);
     }
 }
 
 static int
-native_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, struct timespec *ts)
+native_cond_timedwait(rb_thread_cond_t *cond, pthread_mutex_t *mutex, struct timespec *ts)
 {
-    int r = pthread_cond_timedwait(cond, mutex, ts);
-    if (r != 0 && r != ETIMEDOUT && r != EINTR /* Linux */) {
+    int r;
+
+    /*
+     * An old Linux may return EINTR. Even though POSIX says
+     *   "These functions shall not return an error code of [EINTR]".
+     *   http://pubs.opengroup.org/onlinepubs/009695399/functions/pthread_cond_timedwait.html
+     * Let's hide it from arch generic code.
+     */
+    do {
+	r = pthread_cond_timedwait(&cond->cond, mutex, ts);
+    } while (r == EINTR);
+
+    if (r != 0 && r != ETIMEDOUT) {
 	rb_bug_errno("pthread_cond_timedwait", r);
     }
+
     return r;
+}
+
+#if SIZEOF_TIME_T == SIZEOF_LONG
+typedef unsigned long unsigned_time_t;
+#elif SIZEOF_TIME_T == SIZEOF_INT
+typedef unsigned int unsigned_time_t;
+#elif SIZEOF_TIME_T == SIZEOF_LONG_LONG
+typedef unsigned LONG_LONG unsigned_time_t;
+#else
+# error cannot find integer type which size is same as time_t.
+#endif
+
+#define TIMET_MAX (~(time_t)0 <= 0 ? (time_t)((~(unsigned_time_t)0) >> 1) : (time_t)(~(unsigned_time_t)0))
+
+static struct timespec
+native_cond_timeout(rb_thread_cond_t *cond, struct timespec timeout_rel)
+{
+    int ret;
+    struct timeval tv;
+    struct timespec timeout;
+    struct timespec now;
+
+#if USE_MONOTONIC_COND
+    if (cond->clockid == CLOCK_MONOTONIC) {
+	ret = clock_gettime(cond->clockid, &now);
+	if (ret != 0)
+	    rb_sys_fail("clock_gettime()");
+	goto out;
+    }
+
+    if (cond->clockid != CLOCK_REALTIME)
+	rb_bug("unsupported clockid %d", cond->clockid);
+#endif
+
+    ret = gettimeofday(&tv, 0);
+    if (ret != 0)
+	rb_sys_fail(0);
+    now.tv_sec = tv.tv_sec;
+    now.tv_nsec = tv.tv_usec * 1000;
+
+#if USE_MONOTONIC_COND
+  out:
+#endif
+    timeout.tv_sec = now.tv_sec;
+    timeout.tv_nsec = now.tv_nsec;
+    timeout.tv_sec += timeout_rel.tv_sec;
+    timeout.tv_nsec += timeout_rel.tv_nsec;
+
+    if (timeout.tv_nsec >= 1000*1000*1000) {
+	timeout.tv_sec++;
+	timeout.tv_nsec -= 1000*1000*1000;
+    }
+
+    if (timeout.tv_sec < now.tv_sec)
+	timeout.tv_sec = TIMET_MAX;
+
+    return timeout;
 }
 
 #define native_cleanup_push pthread_cleanup_push
@@ -287,12 +378,14 @@ native_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, struct times
 #define native_thread_yield() ((void)0)
 #endif
 
-#ifndef __CYGWIN__
-static void add_signal_thread_list(rb_thread_t *th);
+#if defined(SIGVTALRM) && !defined(__CYGWIN__) && !defined(__SYMBIAN32__)
+#define USE_SIGNAL_THREAD_LIST 1
 #endif
+#ifdef USE_SIGNAL_THREAD_LIST
+static void add_signal_thread_list(rb_thread_t *th);
 static void remove_signal_thread_list(rb_thread_t *th);
-
 static rb_thread_lock_t signal_thread_list_lock;
+#endif
 
 static pthread_key_t ruby_native_thread_key;
 
@@ -324,26 +417,30 @@ Init_native_thread(void)
     pthread_key_create(&ruby_native_thread_key, NULL);
     th->thread_id = pthread_self();
     native_thread_init(th);
+#ifdef USE_SIGNAL_THREAD_LIST
     native_mutex_initialize(&signal_thread_list_lock);
+#endif
     posix_signal(SIGVTALRM, null_func);
 }
 
 static void
 native_thread_init(rb_thread_t *th)
 {
-    native_cond_initialize(&th->native_thread_data.sleep_cond);
-    native_cond_initialize(&th->native_thread_data.gvl_cond);
+    native_cond_initialize(&th->native_thread_data.sleep_cond, RB_CONDATTR_CLOCK_MONOTONIC);
     ruby_thread_set_native(th);
 }
 
 static void
 native_thread_destroy(rb_thread_t *th)
 {
-    pthread_cond_destroy(&th->native_thread_data.gvl_cond);
-    pthread_cond_destroy(&th->native_thread_data.sleep_cond);
+    native_cond_destroy(&th->native_thread_data.sleep_cond);
 }
 
 #define USE_THREAD_CACHE 0
+
+#if USE_THREAD_CACHE
+static rb_thread_t *register_cached_thread_and_wait(void);
+#endif
 
 #if defined HAVE_PTHREAD_GETATTR_NP || defined HAVE_PTHREAD_ATTR_GET_NP
 #define STACKADDR_AVAILABLE 1
@@ -525,7 +622,6 @@ thread_start_func_1(void *th_ptr)
     if (1) {
 	/* cache thread */
 	rb_thread_t *th;
-	static rb_thread_t *register_cached_thread_and_wait(void);
 	if ((th = register_cached_thread_and_wait()) != 0) {
 	    th_ptr = (void *)th;
 	    th->thread_id = pthread_self();
@@ -535,8 +631,6 @@ thread_start_func_1(void *th_ptr)
 #endif
     return 0;
 }
-
-void rb_thread_create_control_thread(void);
 
 struct cached_thread_entry {
     volatile rb_thread_t **th_area;
@@ -676,7 +770,7 @@ native_thread_create(rb_thread_t *th)
 	CHECK_ERR(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
 
 	err = pthread_create(&th->thread_id, &attr, thread_start_func_1, th);
-	thread_debug("create: %p (%d)", (void *)th, err);
+	thread_debug("create: %p (%d)\n", (void *)th, err);
 	CHECK_ERR(pthread_attr_destroy(&attr));
     }
     return err;
@@ -727,52 +821,28 @@ ubf_pthread_cond_signal(void *ptr)
 {
     rb_thread_t *th = (rb_thread_t *)ptr;
     thread_debug("ubf_pthread_cond_signal (%p)\n", (void *)th);
-    pthread_cond_signal(&th->native_thread_data.sleep_cond);
-}
-
-#if !defined(__CYGWIN__) && !defined(__SYMBIAN32__)
-static void
-ubf_select_each(rb_thread_t *th)
-{
-    thread_debug("ubf_select_each (%p)\n", (void *)th->thread_id);
-    if (th) {
-	pthread_kill(th->thread_id, SIGVTALRM);
-    }
+    native_cond_signal(&th->native_thread_data.sleep_cond);
 }
 
 static void
-ubf_select(void *ptr)
+native_sleep(rb_thread_t *th, struct timeval *timeout_tv)
 {
-    rb_thread_t *th = (rb_thread_t *)ptr;
-    add_signal_thread_list(th);
-    ubf_select_each(th);
-}
-#else
-#define ubf_select 0
-#endif
+    struct timespec timeout;
+    pthread_mutex_t *lock = &th->interrupt_lock;
+    rb_thread_cond_t *cond = &th->native_thread_data.sleep_cond;
 
-#define PER_NANO 1000000000
+    if (timeout_tv) {
+	struct timespec timeout_rel;
 
-static void
-native_sleep(rb_thread_t *th, struct timeval *tv)
-{
-    struct timespec ts;
-    struct timeval tvn;
+	timeout_rel.tv_sec = timeout_tv->tv_sec;
+	timeout_rel.tv_nsec = timeout_tv->tv_usec * 1000;
 
-    if (tv) {
-	gettimeofday(&tvn, NULL);
-	ts.tv_sec = tvn.tv_sec + tv->tv_sec;
-	ts.tv_nsec = (tvn.tv_usec + tv->tv_usec) * 1000;
-	if (ts.tv_nsec >= PER_NANO){
-	    ts.tv_sec += 1;
-	    ts.tv_nsec -= PER_NANO;
-	}
+	timeout = native_cond_timeout(cond, timeout_rel);
     }
 
-    thread_debug("native_sleep %ld\n", (long)(tv ? tv->tv_sec : -1));
     GVL_UNLOCK_BEGIN();
     {
-	pthread_mutex_lock(&th->interrupt_lock);
+	pthread_mutex_lock(lock);
 	th->unblock.func = ubf_pthread_cond_signal;
 	th->unblock.arg = th;
 
@@ -781,46 +851,31 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 	    thread_debug("native_sleep: interrupted before sleep\n");
 	}
 	else {
-	    if (tv == 0 || ts.tv_sec < tvn.tv_sec /* overflow */ ) {
-		int r;
-		thread_debug("native_sleep: pthread_cond_wait start\n");
-		r = pthread_cond_wait(&th->native_thread_data.sleep_cond,
-				      &th->interrupt_lock);
-                if (r) rb_bug_errno("pthread_cond_wait", r);
-		thread_debug("native_sleep: pthread_cond_wait end\n");
-	    }
-	    else {
-		int r;
-		thread_debug("native_sleep: pthread_cond_timedwait start (%ld, %ld)\n",
-			     (unsigned long)ts.tv_sec, ts.tv_nsec);
-		r = pthread_cond_timedwait(&th->native_thread_data.sleep_cond,
-					   &th->interrupt_lock, &ts);
-		if (r && r != ETIMEDOUT) rb_bug_errno("pthread_cond_timedwait", r);
-
-		thread_debug("native_sleep: pthread_cond_timedwait end (%d)\n", r);
-	    }
+	    if (!timeout_tv)
+		native_cond_wait(cond, lock);
+	    else
+		native_cond_timedwait(cond, lock, &timeout);
 	}
 	th->unblock.func = 0;
 	th->unblock.arg = 0;
 
-	pthread_mutex_unlock(&th->interrupt_lock);
+	pthread_mutex_unlock(lock);
     }
     GVL_UNLOCK_END();
 
     thread_debug("native_sleep done\n");
 }
 
+#ifdef USE_SIGNAL_THREAD_LIST
 struct signal_thread_list {
     rb_thread_t *th;
     struct signal_thread_list *prev;
     struct signal_thread_list *next;
 };
 
-#ifndef __CYGWIN__
 static struct signal_thread_list signal_thread_list_anchor = {
     0, 0, 0,
 };
-#endif
 
 #define FGLOCK(lock, body) do { \
     native_mutex_lock(lock); \
@@ -845,7 +900,6 @@ print_signal_list(char *str)
 }
 #endif
 
-#ifndef __CYGWIN__
 static void
 add_signal_thread_list(rb_thread_t *th)
 {
@@ -871,7 +925,6 @@ add_signal_thread_list(rb_thread_t *th)
 	});
     }
 }
-#endif
 
 static void
 remove_signal_thread_list(rb_thread_t *th)
@@ -891,60 +944,168 @@ remove_signal_thread_list(rb_thread_t *th)
 	    free(list); /* ok */
 	});
     }
-    else {
-	/* */
+}
+
+static void
+ubf_select_each(rb_thread_t *th)
+{
+    thread_debug("ubf_select_each (%p)\n", (void *)th->thread_id);
+    if (th) {
+	pthread_kill(th->thread_id, SIGVTALRM);
     }
 }
+
+static void
+ubf_select(void *ptr)
+{
+    rb_thread_t *th = (rb_thread_t *)ptr;
+    add_signal_thread_list(th);
+    ubf_select_each(th);
+}
+
+static void
+ping_signal_thread_list(void) {
+    if (signal_thread_list_anchor.next) {
+	FGLOCK(&signal_thread_list_lock, {
+	    struct signal_thread_list *list;
+
+	    list = signal_thread_list_anchor.next;
+	    while (list) {
+		ubf_select_each(list->th);
+		list = list->next;
+	    }
+	});
+    }
+}
+#else /* USE_SIGNAL_THREAD_LIST */
+static void add_signal_thread_list(rb_thread_t *th) { }
+static void remove_signal_thread_list(rb_thread_t *th) { }
+#define ubf_select 0
+static void ping_signal_thread_list(void) { }
+#endif /* USE_SIGNAL_THREAD_LIST */
 
 static pthread_t timer_thread_id;
-static pthread_cond_t timer_thread_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t timer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
+static int timer_thread_pipe[2] = {-1, -1};
+static int timer_thread_pipe_owner_process;
 
-static struct timespec *
-get_ts(struct timespec *ts, unsigned long nsec)
+#define TT_DEBUG 0
+
+void
+rb_thread_wakeup_timer_thread(void)
 {
-    struct timeval tv;
-    gettimeofday(&tv, 0);
-    ts->tv_sec = tv.tv_sec;
-    ts->tv_nsec = tv.tv_usec * 1000 + nsec;
-    if (ts->tv_nsec >= PER_NANO) {
-	ts->tv_sec++;
-	ts->tv_nsec -= PER_NANO;
+    ssize_t result;
+
+    /* already opened */
+    if (timer_thread_pipe_owner_process == getpid()) {
+	const char *buff = "!";
+      retry:
+	if ((result = write(timer_thread_pipe[1], buff, 1)) <= 0) {
+	    switch (errno) {
+	      case EINTR: goto retry;
+	      case EAGAIN:
+#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
+	      case EWOULDBLOCK:
+#endif
+		break;
+	      default:
+		rb_bug_errno("rb_thread_wakeup_timer_thread - write", errno);
+	    }
+	}
+	if (TT_DEBUG) fprintf(stderr, "rb_thread_wakeup_timer_thread: write\n");
     }
-    return ts;
+    else {
+	/* ignore wakeup */
+    }
 }
 
-static void *
-thread_timer(void *dummy)
+static void
+consume_communication_pipe(void)
 {
-    struct timespec ts;
-
-    native_mutex_lock(&timer_thread_lock);
-    native_cond_broadcast(&timer_thread_cond);
-#define WAIT_FOR_10MS() native_cond_timedwait(&timer_thread_cond, &timer_thread_lock, get_ts(&ts, PER_NANO/100))
-    while (system_working > 0) {
-	int err = WAIT_FOR_10MS();
-	if (err == ETIMEDOUT);
-	else if (err == 0 || err == EINTR) {
-	    if (rb_signal_buff_size() == 0) break;
-	}
-	else rb_bug_errno("thread_timer/timedwait", err);
-
-#if !defined(__CYGWIN__) && !defined(__SYMBIAN32__)
-	if (signal_thread_list_anchor.next) {
-	    FGLOCK(&signal_thread_list_lock, {
-		struct signal_thread_list *list;
-		list = signal_thread_list_anchor.next;
-		while (list) {
-		    ubf_select_each(list->th);
-		    list = list->next;
-		}
-	    });
-	}
+    const size_t buff_size = 1024;
+#ifdef __FreeBSD__
+    char buff[buff_size];
+#else
+    char buff[1024];
 #endif
-	timer_thread_function(dummy);
+    ssize_t result;
+  retry:
+    result = read(timer_thread_pipe[0], buff, buff_size);
+    if (result < 0) {
+	switch (errno) {
+	  case EINTR: goto retry;
+	  default:
+	    rb_bug_errno("consume_communication_pipe: read", errno);
+	}
     }
-    native_mutex_unlock(&timer_thread_lock);
+}
+
+static void
+close_communication_pipe(void)
+{
+    if (close(timer_thread_pipe[0]) < 0) {
+	rb_bug_errno("native_stop_timer_thread - close(ttp[0])", errno);
+    }
+    if (close(timer_thread_pipe[1]) < 0) {
+	rb_bug_errno("native_stop_timer_thread - close(ttp[1])", errno);
+    }
+    timer_thread_pipe[0] = timer_thread_pipe[1] = -1;
+}
+
+/* 100ms.  10ms is too small for user level thread scheduling
+ * on recent Linux (tested on 2.6.35)
+ */
+#define TIME_QUANTUM_USEC (100 * 1000)
+
+static void *
+thread_timer(void *p)
+{
+    rb_global_vm_lock_t *gvl = (rb_global_vm_lock_t *)p;
+    int result;
+    struct timeval timeout;
+
+    if (TT_DEBUG) fprintf(stderr, "start timer thread\n");
+
+    while (system_working > 0) {
+	fd_set rfds;
+
+	/* timer function */
+	ping_signal_thread_list();
+	timer_thread_function(0);
+	if (TT_DEBUG) fprintf(stderr, "tick\n");
+
+	/* wait */
+	FD_ZERO(&rfds);
+	FD_SET(timer_thread_pipe[0], &rfds);
+
+	if (gvl->waiting > 0) {
+	    timeout.tv_sec = 0;
+	    timeout.tv_usec = TIME_QUANTUM_USEC;
+
+	    /* polling (TIME_QUANTUM_USEC usec) */
+	    result = select(timer_thread_pipe[0] + 1, &rfds, 0, 0, &timeout); 
+	}
+	else {
+	    /* wait (infinite) */
+	    result = select(timer_thread_pipe[0] + 1, &rfds, 0, 0, 0); 
+	}
+
+	if (result == 0) {
+	    /* maybe timeout */
+	}
+	else if (result > 0) {
+	    consume_communication_pipe();
+	}
+	else { /* result < 0 */
+	    if (errno == EINTR) {
+		/* interrupted. ignore */
+	    }
+	    else {
+		rb_bug_errno("thread_timer: select", errno);
+	    }
+	}
+    }
+
+    if (TT_DEBUG) fprintf(stderr, "finish timer thread\n");
     return NULL;
 }
 
@@ -962,31 +1123,75 @@ rb_thread_create_timer_thread(void)
 	pthread_attr_setstacksize(&attr,
 				  PTHREAD_STACK_MIN + (THREAD_DEBUG ? BUFSIZ : 0));
 #endif
-	native_mutex_lock(&timer_thread_lock);
-	err = pthread_create(&timer_thread_id, &attr, thread_timer, 0);
+
+	/* communication pipe with timer thread and signal handler */
+	if (timer_thread_pipe_owner_process != getpid()) {
+	    if (timer_thread_pipe[0] != -1) {
+		/* close pipe of parent process */
+		close_communication_pipe();
+	    }
+
+	    err = pipe(timer_thread_pipe);
+	    if (err != 0) {
+		rb_bug_errno("thread_timer: Failed to create communication pipe for timer thread", errno);
+	    }
+#if defined(HAVE_FCNTL) && defined(F_GETFL) && defined(F_SETFL)
+	    {
+		int oflags;
+#if defined(O_NONBLOCK)
+		oflags = fcntl(timer_thread_pipe[1], F_GETFL);
+		oflags |= O_NONBLOCK;
+		fcntl(timer_thread_pipe[1], F_SETFL, oflags);
+#endif /* defined(O_NONBLOCK) */
+#if defined(FD_CLOEXEC)
+		oflags = fcntl(timer_thread_pipe[0], F_GETFD);
+		fcntl(timer_thread_pipe[0], F_SETFD, oflags | FD_CLOEXEC);
+		oflags = fcntl(timer_thread_pipe[1], F_GETFD);
+		fcntl(timer_thread_pipe[1], F_SETFD, oflags | FD_CLOEXEC);
+#endif /* defined(FD_CLOEXEC) */
+	    }
+#endif /* defined(HAVE_FCNTL) && defined(F_GETFL) && defined(F_SETFL) */
+
+	    /* validate pipe on this process */
+	    timer_thread_pipe_owner_process = getpid();
+	}
+
+	/* create timer thread */
+	if (timer_thread_id) {
+	    rb_bug("rb_thread_create_timer_thread: Timer thread was already created\n");
+	}
+	err = pthread_create(&timer_thread_id, &attr, thread_timer, &GET_VM()->gvl);
 	if (err != 0) {
-	    native_mutex_unlock(&timer_thread_lock);
 	    fprintf(stderr, "[FATAL] Failed to create timer thread (errno: %d)\n", err);
 	    exit(EXIT_FAILURE);
 	}
-	native_cond_wait(&timer_thread_cond, &timer_thread_lock);
-	native_mutex_unlock(&timer_thread_lock);
     }
+
     rb_disable_interrupt(); /* only timer thread recieve signal */
 }
 
 static int
-native_stop_timer_thread(void)
+native_stop_timer_thread(int close_anyway)
 {
     int stopped;
-    native_mutex_lock(&timer_thread_lock);
     stopped = --system_working <= 0;
+
+    if (TT_DEBUG) fprintf(stderr, "stop timer thread\n");
     if (stopped) {
-	native_cond_signal(&timer_thread_cond);
-    }
-    native_mutex_unlock(&timer_thread_lock);
-    if (stopped) {
+	/* join */
+	rb_thread_wakeup_timer_thread();
 	native_thread_join(timer_thread_id);
+	if (TT_DEBUG) fprintf(stderr, "joined timer thread\n");
+	timer_thread_id = 0;
+
+	/* close communication pipe */
+	if (close_anyway) {
+	    /* TODO: Uninstall all signal handlers or mask all signals.
+	     *       This pass is cleaning phase.  It is too rare case
+             *       to generate problem, so we remains it in TODO.
+	     */
+	    close_communication_pipe();
+	}
     }
     return stopped;
 }
@@ -994,7 +1199,7 @@ native_stop_timer_thread(void)
 static void
 native_reset_timer_thread(void)
 {
-    timer_thread_id = 0;
+    if (TT_DEBUG)  fprintf(stderr, "reset timer thread\n");
 }
 
 #ifdef HAVE_SIGALTSTACK

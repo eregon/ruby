@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
+#include "ruby/encoding.h"
 #include <errno.h>
 
 #ifdef __APPLE__
@@ -509,7 +510,6 @@ rb_hash_aref(VALUE hash, VALUE key)
     st_data_t val;
 
     if (!RHASH(hash)->ntbl || !st_lookup(RHASH(hash)->ntbl, key, &val)) {
-	int rb_method_basic_definition_p(VALUE klass, ID id);
 	if (!FL_TEST(hash, HASH_PROC_DEFAULT) &&
 	    rb_method_basic_definition_p(CLASS_OF(hash), id_default)) {
 	    return RHASH_IFNONE(hash);
@@ -583,10 +583,11 @@ rb_hash_fetch_m(int argc, VALUE *argv, VALUE hash)
     if (!RHASH(hash)->ntbl || !st_lookup(RHASH(hash)->ntbl, key, &val)) {
 	if (block_given) return rb_yield(key);
 	if (argc == 1) {
-	    VALUE desc = rb_protect(rb_inspect, key, 0);
-	    if (NIL_P(desc) || RSTRING_LEN(desc) > 65) {
+	    volatile VALUE desc = rb_protect(rb_inspect, key, 0);
+	    if (NIL_P(desc)) {
 		desc = rb_any_to_s(key);
 	    }
+	    desc = rb_str_ellipsize(desc, 65);
 	    rb_raise(rb_eKeyError, "key not found: %s", RSTRING_PTR(desc));
 	}
 	return if_none;
@@ -688,8 +689,6 @@ rb_hash_default_proc(VALUE hash)
     return Qnil;
 }
 
-VALUE rb_obj_is_proc(VALUE proc);
-
 /*
  *  call-seq:
  *     hsh.default_proc = proc_obj     -> proc_obj
@@ -738,10 +737,12 @@ key_i(VALUE key, VALUE value, VALUE arg)
  *  call-seq:
  *     hsh.key(value)    -> key
  *
- *  Returns the key for a given value. If not found, returns <code>nil</code>.
+ *  Returns the key of an occurrence of a given value. If the value is
+ *  not found, returns <code>nil</code>.
  *
- *     h = { "a" => 100, "b" => 200 }
+ *     h = { "a" => 100, "b" => 200, "c" => 300, "d" => 300 }
  *     h.key(200)   #=> "b"
+ *     h.key(300)   #=> "c"
  *     h.key(999)   #=> nil
  *
  */
@@ -943,6 +944,7 @@ rb_hash_reject_bang(VALUE hash)
 /*
  *  call-seq:
  *     hsh.reject {| key, value | block }  -> a_hash
+ *     hsh.reject                          -> an_enumerator
  *
  *  Same as <code>Hash#delete_if</code>, but works on (and returns) a
  *  copy of the <i>hsh</i>. Equivalent to
@@ -1366,10 +1368,13 @@ inspect_i(VALUE key, VALUE value, VALUE str)
     VALUE str2;
 
     if (key == Qundef) return ST_CONTINUE;
+    str2 = rb_inspect(key);
     if (RSTRING_LEN(str) > 1) {
 	rb_str_cat2(str, ", ");
     }
-    str2 = rb_inspect(key);
+    else {
+	rb_enc_copy(str, str2);
+    }
     rb_str_buf_append(str, str2);
     OBJ_INFECT(str, str2);
     rb_str_buf_cat2(str, "=>");
@@ -2189,6 +2194,21 @@ envix(const char *nam)
 }
 #endif
 
+#if defined(_WIN32)
+static size_t
+getenvsize(const char* p)
+{
+    const char* porg = p;
+    while (*p++) p += strlen(p) + 1;
+    return p - porg + 1;
+}
+static size_t
+getenvblocksize()
+{
+    return (rb_w32_osver() >= 5) ? 32767 : 5120;
+}
+#endif
+
 void
 ruby_setenv(const char *name, const char *value)
 {
@@ -2201,6 +2221,11 @@ ruby_setenv(const char *name, const char *value)
 	rb_sys_fail("ruby_setenv");
     }
     if (value) {
+	const char* p = GetEnvironmentStringsA();
+	if (!p) goto fail; /* never happen */
+	if (strlen(name) + 2 + strlen(value) + getenvsize(p) >= getenvblocksize()) {
+	    goto fail;  /* 2 for '=' & '\0' */
+	}
 	buf = rb_sprintf("%s=%s", name, value);
     }
     else {

@@ -1,11 +1,12 @@
 /*
-  complex.c: Coded by Tadayoshi Funaba 2008-2010
+  complex.c: Coded by Tadayoshi Funaba 2008-2011
 
   This implementation is based on Keiju Ishitsuka's Complex library
   which is written in ruby.
 */
 
 #include "ruby.h"
+#include "internal.h"
 #include <math.h>
 
 #define NDEBUG
@@ -162,8 +163,21 @@ fun1(numerator)
 fun1(real)
 fun1(real_p)
 
-fun1(to_f)
-fun1(to_i)
+inline static VALUE
+f_to_i(VALUE x)
+{
+    if (TYPE(x) == T_STRING)
+	return rb_str_to_inum(x, 10, 0);
+    return rb_funcall(x, id_to_i, 0);
+}
+inline static VALUE
+f_to_f(VALUE x)
+{
+    if (TYPE(x) == T_STRING)
+	return DBL2NUM(rb_str_to_dbl(x, 0));
+    return rb_funcall(x, id_to_f, 0);
+}
+
 fun1(to_r)
 fun1(to_s)
 
@@ -494,8 +508,6 @@ imp1(exp)
 imp2(hypot)
 
 #define m_hypot(x,y) m_hypot_bang((x),(y))
-
-extern VALUE rb_math_log(int argc, VALUE *argv);
 
 static VALUE
 m_log_bang(VALUE x)
@@ -1079,8 +1091,6 @@ nucomp_inexact_p(VALUE self)
 }
 #endif
 
-extern VALUE rb_lcm(VALUE x, VALUE y);
-
 /*
  * call-seq:
  *    cmp.denominator  ->  integer
@@ -1432,21 +1442,6 @@ make_patterns(void)
 #define id_match rb_intern("match")
 #define f_match(x,y) rb_funcall((x), id_match, 1, (y))
 
-#define id_aref rb_intern("[]")
-#define f_aref(x,y) rb_funcall((x), id_aref, 1, (y))
-
-#define id_post_match rb_intern("post_match")
-#define f_post_match(x) rb_funcall((x), id_post_match, 0)
-
-#define id_split rb_intern("split")
-#define f_split(x,y) rb_funcall((x), id_split, 1, (y))
-
-#define id_include_p rb_intern("include?")
-#define f_include_p(x,y) rb_funcall((x), id_include_p, 1, (y))
-
-#define id_count rb_intern("count")
-#define f_count(x,y) rb_funcall((x), id_count, 1, (y))
-
 #define id_gsub_bang rb_intern("gsub!")
 #define f_gsub_bang(x,y,z) rb_funcall((x), id_gsub_bang, 2, (y), (z))
 
@@ -1466,27 +1461,27 @@ string_to_c_internal(VALUE self)
 
 	m = f_match(comp_pat0, s);
 	if (!NIL_P(m)) {
-	  sr = f_aref(m, INT2FIX(1));
-	  si = f_aref(m, INT2FIX(2));
-	  re = f_post_match(m);
-	  po = 1;
+	    sr = rb_reg_nth_match(1, m);
+	    si = rb_reg_nth_match(2, m);
+	    re = rb_reg_match_post(m);
+	    po = 1;
 	}
 	if (NIL_P(m)) {
 	    m = f_match(comp_pat1, s);
 	    if (!NIL_P(m)) {
 		sr = Qnil;
-		si = f_aref(m, INT2FIX(1));
+		si = rb_reg_nth_match(1, m);
 		if (NIL_P(si))
 		    si = rb_usascii_str_new2("");
 		{
 		    VALUE t;
 
-		    t = f_aref(m, INT2FIX(2));
+		    t = rb_reg_nth_match(2, m);
 		    if (NIL_P(t))
 			t = rb_usascii_str_new2("1");
 		    rb_str_concat(si, t);
 		}
-		re = f_post_match(m);
+		re = rb_reg_match_post(m);
 		po = 0;
 	    }
 	}
@@ -1494,35 +1489,35 @@ string_to_c_internal(VALUE self)
 	    m = f_match(comp_pat2, s);
 	    if (NIL_P(m))
 		return rb_assoc_new(Qnil, self);
-	    sr = f_aref(m, INT2FIX(1));
-	    if (NIL_P(f_aref(m, INT2FIX(2))))
+	    sr = rb_reg_nth_match(1, m);
+	    if (NIL_P(rb_reg_nth_match(2, m)))
 		si = Qnil;
 	    else {
 		VALUE t;
 
-		si = f_aref(m, INT2FIX(3));
-		t = f_aref(m, INT2FIX(4));
+		si = rb_reg_nth_match(3, m);
+		t = rb_reg_nth_match(4, m);
 		if (NIL_P(t))
 		    t = rb_usascii_str_new2("1");
 		rb_str_concat(si, t);
 	    }
-	    re = f_post_match(m);
+	    re = rb_reg_match_post(m);
 	    po = 0;
 	}
 	r = INT2FIX(0);
 	i = INT2FIX(0);
 	if (!NIL_P(sr)) {
-	    if (f_include_p(sr, a_slash))
+	    if (strchr(RSTRING_PTR(sr), '/'))
 		r = f_to_r(sr);
-	    else if (f_gt_p(f_count(sr, a_dot_and_an_e), INT2FIX(0)))
+	    else if (strpbrk(RSTRING_PTR(sr), ".eE"))
 		r = f_to_f(sr);
 	    else
 		r = f_to_i(sr);
 	}
 	if (!NIL_P(si)) {
-	    if (f_include_p(si, a_slash))
+	    if (strchr(RSTRING_PTR(si), '/'))
 		i = f_to_r(si);
-	    else if (f_gt_p(f_count(si, a_dot_and_an_e), INT2FIX(0)))
+	    else if (strpbrk(RSTRING_PTR(si), ".eE"))
 		i = f_to_f(si);
 	    else
 		i = f_to_i(si);

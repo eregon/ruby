@@ -4,11 +4,11 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gem_installer_test_case"
+require 'rubygems/installer_test_case'
 require 'rubygems/install_update_options'
 require 'rubygems/command'
 
-class TestGemInstallUpdateOptions < GemInstallerTestCase
+class TestGemInstallUpdateOptions < Gem::InstallerTestCase
 
   def setup
     super
@@ -46,9 +46,8 @@ class TestGemInstallUpdateOptions < GemInstallerTestCase
 
     @installer = Gem::Installer.new @gem, @cmd.options
     @installer.install
-    assert File.exist?(File.join(Gem.user_dir, 'gems'))
-    assert File.exist?(File.join(Gem.user_dir, 'gems',
-                                 @spec.full_name))
+    assert_path_exists File.join(Gem.user_dir, 'gems')
+    assert_path_exists File.join(Gem.user_dir, 'gems', @spec.full_name)
   end
 
   def test_user_install_disabled_read_only
@@ -59,16 +58,16 @@ class TestGemInstallUpdateOptions < GemInstallerTestCase
 
       refute @cmd.options[:user_install]
 
-      File.chmod 0755, @userhome
+      FileUtils.chmod 0755, @userhome
       FileUtils.chmod 0000, @gemhome
 
+      Gem.use_paths @gemhome, @userhome
+
       assert_raises(Gem::FilePermissionError) do
-        @installer = Gem::Installer.new @gem, @cmd.options
+        Gem::Installer.new(@gem, @cmd.options).install
       end
     end
   ensure
     FileUtils.chmod 0755, @gemhome
   end
-
 end
-

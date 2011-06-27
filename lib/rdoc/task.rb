@@ -37,9 +37,8 @@ require 'rake'
 require 'rake/tasklib'
 
 ##
-# Create a documentation task that will generate the RDoc files for a project.
-#
-# The RDoc::Task will create the following targets:
+# RDoc::Task creates the following rake tasks to generate and clean up RDoc
+# output:
 #
 # [rdoc]
 #   Main task for this RDoc task.
@@ -56,12 +55,12 @@ require 'rake/tasklib'
 #   gem 'rdoc'
 #   require 'rdoc/task'
 #
-#   RDoc::Task.new do |rd|
-#     rd.main = "README.rdoc"
-#     rd.rdoc_files.include("README.rdoc", "lib/**/*.rb")
+#   RDoc::Task.new do |rdoc|
+#     rdoc.main = "README.rdoc"
+#     rdoc.rdoc_files.include("README.rdoc", "lib/**/*.rb")
 #   end
 #
-# The +rd+ object passed to the block is an RDoc::Task object. See the
+# The +rdoc+ object passed to the block is an RDoc::Task object. See the
 # attributes list for the RDoc::Task class for available customization options.
 #
 # == Specifying different task names
@@ -73,10 +72,10 @@ require 'rake/tasklib'
 #   gem 'rdoc'
 #   require 'rdoc/task'
 #
-#   RDoc::Task.new :rdoc_dev do |rd|
-#     rd.main = "README.doc"
-#     rd.rdoc_files.include("README.rdoc", "lib/**/*.rb")
-#     rd.options << "--all"
+#   RDoc::Task.new :rdoc_dev do |rdoc|
+#     rdoc.main = "README.doc"
+#     rdoc.rdoc_files.include("README.rdoc", "lib/**/*.rb")
+#     rdoc.options << "--all"
 #   end
 #
 # The tasks would then be named :<em>rdoc_dev</em>,
@@ -149,17 +148,45 @@ class RDoc::Task < Rake::TaskLib
   # Create an RDoc task with the given name. See the RDoc::Task class overview
   # for documentation.
 
-  def initialize(name = :rdoc)  # :yield: self
-    if name.is_a? Hash then
-      invalid_options = name.keys.map { |k| k.to_sym } -
-        [:rdoc, :clobber_rdoc, :rerdoc]
+  def initialize name = :rdoc # :yield: self
+    defaults
 
-      unless invalid_options.empty? then
-        raise ArgumentError, "invalid options: #{invalid_options.join(", ")}"
-      end
-    end
+    check_names name
 
     @name = name
+
+    yield self if block_given?
+
+    define
+  end
+
+  ##
+  # Ensures that +names+ only includes names for the :rdoc, :clobber_rdoc and
+  # :rerdoc.  If other names are given an ArgumentError is raised.
+
+  def check_names names
+    return unless Hash === names
+
+    invalid_options =
+      names.keys.map { |k| k.to_sym } - [:rdoc, :clobber_rdoc, :rerdoc]
+
+    unless invalid_options.empty? then
+      raise ArgumentError, "invalid options: #{invalid_options.join ', '}"
+    end
+  end
+
+  ##
+  # Task description for the clobber rdoc task or its renamed equivalent
+
+  def clobber_task_description
+    "Remove RDoc HTML files"
+  end
+
+  ##
+  # Sets default task values
+
+  def defaults
+    @name = :rdoc
     @rdoc_files = Rake::FileList.new
     @rdoc_dir = 'html'
     @main = nil
@@ -167,14 +194,12 @@ class RDoc::Task < Rake::TaskLib
     @template = nil
     @generator = nil
     @options = []
-    yield self if block_given?
-    define
   end
 
   ##
   # All source is inline now.  This method is deprecated
 
-  def inline_source() # :nodoc:
+  def inline_source # :nodoc:
     warn "RDoc::Task#inline_source is deprecated"
     true
   end
@@ -190,13 +215,13 @@ class RDoc::Task < Rake::TaskLib
   # Create the tasks defined by this task lib.
 
   def define
-    desc "Build RDoc HTML files"
+    desc rdoc_task_description
     task rdoc_task_name
 
-    desc "Rebuild RDoc HTML files"
+    desc rerdoc_task_description
     task rerdoc_task_name => [clobber_task_name, rdoc_task_name]
 
-    desc "Remove RDoc HTML files"
+    desc clobber_task_description
     task clobber_task_name do
       rm_r @rdoc_dir rescue nil
     end
@@ -215,11 +240,9 @@ class RDoc::Task < Rake::TaskLib
       @before_running_rdoc.call if @before_running_rdoc
       args = option_list + @rdoc_files
 
-      if Rake.application.options.trace then
-        $stderr.puts "rdoc #{args.join ' '}"
-      end
+      $stderr.puts "rdoc #{args.join ' '}" if Rake.application.options.trace
       require 'rdoc/rdoc'
-      RDoc::RDoc.new.document(args)
+      RDoc::RDoc.new.document args
     end
 
     self
@@ -245,6 +268,20 @@ class RDoc::Task < Rake::TaskLib
 
   def before_running_rdoc(&block)
     @before_running_rdoc = block
+  end
+
+  ##
+  # Task description for the rdoc task or its renamed equivalent
+
+  def rdoc_task_description
+    'Build RDoc HTML files'
+  end
+
+  ##
+  # Task description for the rerdoc task or its renamed description
+
+  def rerdoc_task_description
+    "Rebuild RDoc HTML files"
   end
 
   private

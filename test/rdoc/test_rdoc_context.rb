@@ -17,6 +17,7 @@ class TestRDocContext < XrefTestCase
     assert_equal nil, @context.parent
     assert_equal :public, @context.visibility
     assert_equal 1, @context.sections.length
+    assert_equal nil, @context.temporary_section
 
     assert_empty @context.classes_hash
     assert_empty @context.modules_hash
@@ -105,6 +106,45 @@ class TestRDocContext < XrefTestCase
     assert_includes RDoc::TopLevel.classes.map { |k| k.full_name }, 'C1::Klass'
   end
 
+  def test_add_class_basic_object
+    skip 'BasicObject is 1.9 only' unless defined?(BasicObject)
+
+    @xref_data.add_class RDoc::NormalClass, 'BasicObject'
+
+    basic = @xref_data.find_module_named 'BasicObject'
+
+    assert_nil basic.superclass
+
+    @c1.add_class RDoc::NormalClass, 'BasicObject'
+
+    basic = @c1.find_module_named 'BasicObject'
+
+    assert_equal 'Object', basic.superclass
+  end
+
+  def test_add_class_object
+    root_class = defined?(BasicObject) ? 'BasicObject' : nil
+
+    @xref_data.add_class RDoc::NormalClass, 'Object'
+
+    object = @xref_data.find_module_named 'Object'
+
+    assert_equal root_class, object.superclass
+
+    @c1.add_class RDoc::NormalClass, 'Object'
+
+    object = @c1.find_module_named 'Object'
+
+    assert_equal 'Object', object.superclass.full_name
+  end
+
+  def test_add_class_singleton
+    @c1.add_class RDoc::NormalClass, 'Klass', 'Object'
+
+    assert_includes @c1.classes.map { |k| k.full_name }, 'C1::Klass'
+    assert_includes RDoc::TopLevel.classes.map { |k| k.full_name }, 'C1::Klass'
+  end
+
   def test_add_class_superclass
     @c1.add_class RDoc::NormalClass, 'Klass', 'Object'
     @c1.add_class RDoc::NormalClass, 'Klass', 'Other'
@@ -143,6 +183,16 @@ class TestRDocContext < XrefTestCase
     assert_equal [incl], @context.includes
   end
 
+  def test_add_include_twice
+    incl1 = RDoc::Include.new 'Name', 'comment'
+    @context.add_include incl1
+
+    incl2 = RDoc::Include.new 'Name', 'comment'
+    @context.add_include incl2
+
+    assert_equal [incl1], @context.includes
+  end
+
   def test_add_method
     meth = RDoc::AnyMethod.new nil, 'old_name'
     meth.visibility = nil
@@ -174,9 +224,16 @@ class TestRDocContext < XrefTestCase
   end
 
   def test_add_module_alias
-    c3_c4 = @c2.add_module_alias @c2_c3, 'C4'
+    tl = RDoc::TopLevel.new 'file.rb'
 
-    assert_equal @c2.find_module_named('C4'), c3_c4
+    c3_c4 = @c2.add_module_alias @c2_c3, 'C4', tl
+
+    c4 = @c2.find_module_named('C4')
+
+    alias_constant = @c2.constants.first
+
+    assert_equal c4, c3_c4
+    assert_equal tl, alias_constant.file
   end
 
   def test_add_module_class
@@ -195,6 +252,29 @@ class TestRDocContext < XrefTestCase
     assert_includes @c1.top_level.requires, req
   end
 
+  def test_add_section
+    default_section = @context.sections.first
+
+    @context.add_section nil, '# comment'
+
+    assert_equal 1, @context.sections.length
+    assert_equal '# comment', @context.sections.first.comment
+
+    @context.add_section nil, '# new comment'
+
+    assert_equal 1, @context.sections.length
+    assert_equal "# comment\n# ---\n# new comment",
+                 @context.sections.first.comment
+
+    @context.add_section 'other', ''
+
+    assert_equal 2, @context.sections.length
+
+    new_section = @context.sections.find { |section| section.title == 'other' }
+    assert new_section
+    assert_equal default_section, @context.current_section
+  end
+
   def test_add_to
     incl = RDoc::Include.new 'Name', 'comment'
     arr = []
@@ -203,6 +283,19 @@ class TestRDocContext < XrefTestCase
     assert_includes arr, incl
     assert_equal @context, incl.parent
     assert_equal @context.current_section, incl.section
+  end
+
+  def test_add_to_temporary_section
+    incl = RDoc::Include.new 'Name', 'comment'
+    arr = []
+    section = @context.add_section 'temporary', ''
+    @context.temporary_section = section
+
+    @context.add_to arr, incl
+
+    assert_includes arr, incl
+    assert_equal @context, incl.parent
+    assert_equal section, incl.section
   end
 
   def test_add_to_no_document_self
@@ -232,6 +325,16 @@ class TestRDocContext < XrefTestCase
     assert_equal %w[C3::H1 C3::H2], @c3.classes.map { |k| k.full_name }
   end
 
+  def test_current_section
+    default_section = @context.current_section
+
+    new_section = @context.add_section 'other', ''
+    @context.temporary_section = new_section
+
+    assert_equal new_section, @context.current_section
+    assert_equal default_section, @context.current_section
+  end
+
   def test_defined_in_eh
     assert @c1.defined_in?(@c1.top_level)
 
@@ -242,6 +345,34 @@ class TestRDocContext < XrefTestCase
     assert_equal @c3,    @c3
     refute_equal @c2,    @c3
     refute_equal @c2_c3, @c3
+  end
+
+  def test_each_section
+    sects  = []
+    consts = []
+    attrs  = []
+
+    @c1.each_section do |section, constants, attributes|
+      sects  << section
+      consts << constants
+      attrs  << attributes
+    end
+
+    assert_equal [nil, 'separate'], sects.map { |section| section.title }
+
+    expected_consts = [
+      [@c1.constants.first],
+      [],
+    ]
+
+    assert_equal expected_consts, consts
+
+    expected_attrs = [
+      [@c1.attributes[0], @c1.attributes[3]],
+      [@c1.attributes[1], @c1.attributes[2]],
+    ]
+
+    assert_equal expected_attrs, attrs
   end
 
   def test_find_attribute_named
@@ -364,6 +495,200 @@ class TestRDocContext < XrefTestCase
 
     assert_equal 1,  @c2_c3.<=>(@c2)
     assert_equal(-1, @c2_c3.<=>(@c3))
+  end
+
+  def test_methods_by_type
+    expected = {
+      'instance' => {
+        :private   => [],
+        :protected => [],
+        :public    => [@c1_m],
+      },
+      'class' => {
+        :private   => [],
+        :protected => [],
+        :public    => [@c1__m],
+      },
+    }
+
+    assert_equal expected, @c1.methods_by_type
+  end
+
+  def test_methods_by_type_section
+    separate = @c1.sections_hash['separate']
+    @c1_m.section = separate
+
+    expected = {
+      'instance' => {
+        :private   => [],
+        :protected => [],
+        :public    => [@c1_m],
+      },
+      'class' => {
+        :private   => [],
+        :protected => [],
+        :public    => [],
+      },
+    }
+
+    assert_equal expected, @c1.methods_by_type(separate)
+  end
+
+  def test_methods_matching
+    methods = []
+
+    @parent.methods_matching 'm' do |m|
+      methods << m
+    end
+
+    assert_equal [@parent_m], methods
+  end
+
+  def test_methods_matching_singleton
+    methods = []
+
+    @parent.methods_matching 'm', true do |m|
+      methods << m
+    end
+
+    assert_equal [@parent__m], methods
+  end
+
+  def test_methods_matching_inherit
+    methods = []
+
+    @child.methods_matching 'm' do |m|
+      methods << m
+    end
+
+    assert_equal [@parent_m], methods
+  end
+
+  def test_remove_invisible_private
+    util_visibilities
+
+    @vis.remove_invisible :private
+
+    assert_equal [@pub, @prot, @priv], @vis.method_list
+    assert_equal [@apub, @aprot, @apriv], @vis.attributes
+  end
+
+  def test_remove_invisible_protected
+    util_visibilities
+
+    @vis.remove_invisible :protected
+
+    assert_equal [@pub, @prot], @vis.method_list
+    assert_equal [@apub, @aprot], @vis.attributes
+  end
+
+  def test_remove_invisible_public
+    util_visibilities
+
+    @vis.remove_invisible :public
+
+    assert_equal [@pub], @vis.method_list
+    assert_equal [@apub], @vis.attributes
+  end
+
+  def test_remove_invisible_public_force
+    util_visibilities
+
+    @priv.force_documentation = true
+    @prot.force_documentation = true
+    @apriv.force_documentation = true
+    @aprot.force_documentation = true
+
+    @vis.remove_invisible :public
+
+    assert_equal [@pub, @prot, @priv], @vis.method_list
+    assert_equal [@apub, @aprot, @apriv], @vis.attributes
+  end
+
+  def test_remove_invisible_in_protected
+    util_visibilities
+
+    methods = [@pub, @prot, @priv]
+
+    @c1.remove_invisible_in methods, :protected
+
+    assert_equal [@pub, @prot], methods
+  end
+
+  def test_remove_invisible_in_protected_force
+    util_visibilities
+
+    @priv.force_documentation = true
+
+    methods = [@pub, @prot, @priv]
+
+    @c1.remove_invisible_in methods, :protected
+
+    assert_equal [@pub, @prot, @priv], methods
+  end
+
+  def test_remove_invisible_in_public
+    util_visibilities
+
+    methods = [@pub, @prot, @priv]
+
+    @c1.remove_invisible_in methods, :public
+
+    assert_equal [@pub], methods
+  end
+
+  def test_remove_invisible_in_public_force
+    util_visibilities
+
+    @prot.force_documentation = true
+    @priv.force_documentation = true
+
+    methods = [@pub, @prot, @priv]
+
+    @c1.remove_invisible_in methods, :public
+
+    assert_equal [@pub, @prot, @priv], methods
+  end
+
+  def test_set_current_section
+    default_section = @context.sections.first
+
+    @context.set_current_section nil, ''
+
+    assert_equal default_section, @context.current_section
+
+    @context.set_current_section 'other', ''
+
+    new_section = @context.sections.find { |section|
+      section != default_section
+    }
+
+    assert_equal new_section, @context.current_section
+  end
+
+  def util_visibilities
+    @pub  = RDoc::AnyMethod.new nil, 'pub'
+    @prot = RDoc::AnyMethod.new nil, 'prot'
+    @priv = RDoc::AnyMethod.new nil, 'priv'
+
+    @apub  = RDoc::Attr.new nil, 'pub',  'RW', nil
+    @aprot = RDoc::Attr.new nil, 'prot', 'RW', nil
+    @apriv = RDoc::Attr.new nil, 'priv', 'RW', nil
+
+    @vis = RDoc::NormalClass.new 'Vis'
+    @vis.add_method @pub
+    @vis.add_method @prot
+    @vis.add_method @priv
+
+    @vis.add_attribute @apub
+    @vis.add_attribute @aprot
+    @vis.add_attribute @apriv
+
+    @prot.visibility = :protected
+    @priv.visibility = :private
+
+    @aprot.visibility = :protected
+    @apriv.visibility = :private
   end
 
 end

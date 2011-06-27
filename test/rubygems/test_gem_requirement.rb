@@ -4,10 +4,10 @@
 # File a patch instead and assign it to Ryan Davis or Eric Hodel.
 ######################################################################
 
-require "test/rubygems/gemutilities"
+require 'rubygems/test_case'
 require "rubygems/requirement"
 
-class TestGemRequirement < RubyGemTestCase
+class TestGemRequirement < Gem::TestCase
 
   def test_equals2
     r = req "= 1.2"
@@ -193,11 +193,15 @@ class TestGemRequirement < RubyGemTestCase
     assert_satisfied_by "  ",          "> 0.a "
     assert_satisfied_by "",            " >  0.a"
     assert_satisfied_by "3.1",         "< 3.2.rc1"
+
     assert_satisfied_by "3.2.0",       "> 3.2.0.rc1"
     assert_satisfied_by "3.2.0.rc2",   "> 3.2.0.rc1"
+
     assert_satisfied_by "3.0.rc2",     "< 3.0"
     assert_satisfied_by "3.0.rc2",     "< 3.0.0"
     assert_satisfied_by "3.0.rc2",     "< 3.0.1"
+
+    assert_satisfied_by "3.0.rc2",     "> 0"
   end
 
   def test_illformed_requirements
@@ -250,6 +254,19 @@ class TestGemRequirement < RubyGemTestCase
     assert_satisfied_by "1.4.5", "~> 1.4.4"
     refute_satisfied_by "1.5",   "~> 1.4.4"
     refute_satisfied_by "2.0",   "~> 1.4.4"
+  end
+
+  def test_specific
+    refute req('> 1') .specific?
+    refute req('>= 1').specific?
+
+    assert req('!= 1').specific?
+    assert req('< 1') .specific?
+    assert req('<= 1').specific?
+    assert req('= 1') .specific?
+    assert req('~> 1').specific?
+
+    assert req('> 1', '> 2').specific? # GIGO
   end
 
   def test_bad

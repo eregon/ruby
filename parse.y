@@ -18,6 +18,7 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include "node.h"
 #include "parse.h"
 #include "id.h"
@@ -403,11 +404,6 @@ static ID  *local_tbl_gen(struct parser_params*);
 #define local_tbl() local_tbl_gen(parser)
 
 static void fixup_nodes(NODE **);
-
-extern int rb_dvar_defined(ID);
-extern int rb_local_defined(ID);
-extern int rb_parse_in_eval(void);
-extern int rb_parse_in_main(void);
 
 static VALUE reg_compile_gen(struct parser_params*, VALUE, int);
 #define reg_compile(str,options) reg_compile_gen(parser, (str), (options))
@@ -1518,7 +1514,8 @@ mlhs_basic	: mlhs_head
 		    /*%%%*/
 			$$ = NEW_MASGN($1, NEW_POSTARG(-1, $4));
 		    /*%
-			$$ = mlhs_add_star($1, Qnil);
+			$1 = mlhs_add_star($1, Qnil);
+			$$ = mlhs_add($1, $4);
 		    %*/
 		    }
 		| tSTAR mlhs_node
@@ -1534,7 +1531,8 @@ mlhs_basic	: mlhs_head
 		    /*%%%*/
 			$$ = NEW_MASGN(0, NEW_POSTARG($2,$4));
 		    /*%
-			$$ = mlhs_add_star(mlhs_new(), $2);
+			$2 = mlhs_add_star(mlhs_new(), $2);
+			$$ = mlhs_add($2, $4);
 		    %*/
 		    }
 		| tSTAR
@@ -1551,6 +1549,7 @@ mlhs_basic	: mlhs_head
 			$$ = NEW_MASGN(0, NEW_POSTARG(-1, $3));
 		    /*%
 			$$ = mlhs_add_star(mlhs_new(), Qnil);
+			$$ = mlhs_add($$, $3);
 		    %*/
 		    }
 		;
@@ -2415,6 +2414,18 @@ opt_paren_args	: none
 
 opt_call_args	: none
 		| call_args
+		| args ','
+		    {
+		      $$ = $1;
+		    }
+		| args ',' assocs ','
+		    {
+		    /*%%%*/
+			$$ = arg_append($1, NEW_HASH($3));
+		    /*%
+			$$ = arg_add_assocs($1, $3);
+		    %*/
+		    }
 		;
 
 call_args	: command
@@ -2487,10 +2498,6 @@ block_arg	: tAMPER arg_value
 opt_block_arg	: ',' block_arg
 		    {
 			$$ = $2;
-		    }
-		| ','
-		    {
-			$$ = 0;
 		    }
 		| none
 		    {
@@ -3946,11 +3953,16 @@ words		: tWORDS_BEG ' ' tSTRING_END
 			$$ = NEW_ZARRAY();
 		    /*%
 			$$ = dispatch0(words_new);
+			$$ = dispatch1(array, $$);
 		    %*/
 		    }
 		| tWORDS_BEG word_list tSTRING_END
 		    {
+		    /*%%%*/
 			$$ = $2;
+		    /*%
+			$$ = dispatch1(array, $2);
+		    %*/
 		    }
 		;
 
@@ -3996,11 +4008,16 @@ qwords		: tQWORDS_BEG ' ' tSTRING_END
 			$$ = NEW_ZARRAY();
 		    /*%
 			$$ = dispatch0(qwords_new);
+			$$ = dispatch1(array, $$);
 		    %*/
 		    }
 		| tQWORDS_BEG qword_list tSTRING_END
 		    {
+		    /*%%%*/
 			$$ = $2;
+		    /*%
+			$$ = dispatch1(array, $2);
+		    %*/
 		    }
 		;
 
@@ -5082,8 +5099,6 @@ parser_yyerror(struct parser_params *parser, const char *msg)
 static void parser_prepare(struct parser_params *parser);
 
 #ifndef RIPPER
-VALUE ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always);
-
 static VALUE
 debug_lines(const char *f)
 {
@@ -5104,7 +5119,6 @@ debug_lines(const char *f)
 static VALUE
 coverage(const char *f, int n)
 {
-    extern VALUE rb_get_coverages(void);
     VALUE coverages = rb_get_coverages();
     if (RTEST(coverages) && RBASIC(coverages)->klass == 0) {
 	VALUE fname = rb_str_new2(f);
@@ -5220,6 +5234,7 @@ lex_getline(struct parser_params *parser)
     must_be_ascii_compatible(line);
 #ifndef RIPPER
     if (ruby_debug_lines) {
+	rb_enc_associate(line, parser->enc);
 	rb_ary_push(ruby_debug_lines, line);
     }
     if (ruby_coverage) {
@@ -5350,7 +5365,8 @@ parser_str_new(const char *p, long n, rb_encoding *enc, int func, rb_encoding *e
 }
 
 #define lex_goto_eol(parser) ((parser)->parser_lex_p = (parser)->parser_lex_pend)
-#define peek(c) (lex_p < lex_pend && (c) == *lex_p)
+#define peek(c) peek_n((c), 0)
+#define peek_n(c,n) (lex_p+(n) < lex_pend && (c) == (unsigned char)lex_p[n])
 
 static inline int
 parser_nextc(struct parser_params *parser)
@@ -5969,6 +5985,18 @@ parser_parse_string(struct parser_params *parser, NODE *quote)
 
     tokfix();
     set_yylval_str(STR_NEW3(tok(), toklen(), enc, func));
+
+#ifdef RIPPER
+    if (!NIL_P(parser->delayed)){
+	ptrdiff_t len = lex_p - parser->tokp;
+	if (len > 0) {
+	    rb_enc_str_buf_cat(parser->delayed, parser->tokp, len, enc);
+	}
+	ripper_dispatch_delayed_token(parser, tSTRING_CONTENT);
+	parser->tokp = lex_p;
+    }
+#endif
+
     return tSTRING_CONTENT;
 }
 
@@ -6216,10 +6244,12 @@ parser_encode_length(struct parser_params *parser, const char *name, long len)
 	if (rb_memcicmp(name + nlen + 1, "unix", 4) == 0)
 	    return nlen;
     }
-    if (len > 4 && name[nlen = len - 5] == '-') {
+    if (len > 4 && name[nlen = len - 4] == '-') {
 	if (rb_memcicmp(name + nlen + 1, "dos", 3) == 0)
 	    return nlen;
-	if (rb_memcicmp(name + nlen + 1, "mac", 3) == 0)
+	if (rb_memcicmp(name + nlen + 1, "mac", 3) == 0 &&
+	    !(len == 8 && rb_memcicmp(name, "utf8-mac", len) == 0))
+	    /* exclude UTF8-MAC because the encoding named "UTF8" doesn't exist in Ruby */
 	    return nlen;
     }
     return len;
@@ -6246,6 +6276,15 @@ parser_set_encode(struct parser_params *parser, const char *name)
 	goto error;
     }
     parser->enc = enc;
+#ifndef RIPPER
+    if (ruby_debug_lines) {
+	long i, n = RARRAY_LEN(ruby_debug_lines);
+	const VALUE *p = RARRAY_PTR(ruby_debug_lines);
+	for (i = 0; i < n; ++i) {
+	    rb_enc_associate_index(*p, idx);
+	}
+    }
+#endif
 }
 
 static int
@@ -6506,6 +6545,8 @@ parser_prepare(struct parser_params *parser)
 #define IS_END() (lex_state == EXPR_END || lex_state == EXPR_ENDARG || lex_state == EXPR_ENDFN)
 #define IS_BEG() (lex_state == EXPR_BEG || lex_state == EXPR_MID || lex_state == EXPR_VALUE || lex_state == EXPR_CLASS)
 #define IS_SPCARG(c) (IS_ARG() && space_seen && !ISSPACE(c))
+#define IS_LABEL_POSSIBLE() ((lex_state == EXPR_BEG && !cmd_state) || IS_ARG())
+#define IS_LABEL_SUFFIX(n) (peek_n(':',(n)) && !peek_n(':', (n)+1))
 
 #ifndef RIPPER
 #define ambiguous_operator(op, syn) ( \
@@ -7717,7 +7758,7 @@ parser_yylex(struct parser_params *parser)
 	    else {
 		if (lex_state == EXPR_FNAME) {
 		    if ((c = nextc()) == '=' && !peek('~') && !peek('>') &&
-			(!peek('=') || (lex_p + 1 < lex_pend && lex_p[1] == '>'))) {
+			(!peek('=') || (peek_n('>', 1)))) {
 			result = tIDENTIFIER;
 			tokadd(c);
 			tokfix();
@@ -7734,9 +7775,8 @@ parser_yylex(struct parser_params *parser)
 		}
 	    }
 
-	    if ((lex_state == EXPR_BEG && !cmd_state) ||
-		IS_ARG()) {
-		if (peek(':') && !(lex_p + 1 < lex_pend && lex_p[1] == ':')) {
+	    if (IS_LABEL_POSSIBLE()) {
+		if (IS_LABEL_SUFFIX(0)) {
 		    lex_state = EXPR_BEG;
 		    nextc();
 		    set_yylval_name(TOK_INTERN(!ENC_SINGLE(mb)));
@@ -7826,6 +7866,7 @@ yylex(void *p)
 #ifdef RIPPER
     if (!NIL_P(parser->delayed)) {
 	ripper_dispatch_delayed_token(parser, t);
+	return t;
     }
     if (t != 0)
 	ripper_dispatch_scan_event(parser, t);
@@ -9173,9 +9214,6 @@ dvar_curr_gen(struct parser_params *parser, ID id)
 }
 
 #ifndef RIPPER
-VALUE rb_reg_compile(VALUE str, int options, const char *sourcefile, int sourceline);
-VALUE rb_reg_check_preprocess(VALUE);
-
 static void
 reg_fragment_setenc_gen(struct parser_params* parser, VALUE str, int options)
 {
@@ -10076,9 +10114,6 @@ static const rb_data_type_t parser_data_type = {
     },
 };
 
-VALUE rb_parser_get_yydebug(VALUE);
-VALUE rb_parser_set_yydebug(VALUE, VALUE);
-
 #ifndef RIPPER
 #undef rb_reserved_word
 
@@ -10111,8 +10146,7 @@ rb_parser_new(void)
  *  call-seq:
  *    ripper#end_seen?   -> Boolean
  *
- *  Return if parsed source ended by +\_\_END\_\_+.
- *  This number starts from 1.
+ *  Return true if parsed source ended by +\_\_END\_\_+.
  */
 VALUE
 rb_parser_end_seen_p(VALUE vparser)
@@ -10553,8 +10587,6 @@ ripper_initialize(int argc, VALUE *argv, VALUE self)
     return Qnil;
 }
 
-extern VALUE rb_thread_pass(void);
-
 struct ripper_args {
     struct parser_params *parser;
     int argc;
@@ -10716,7 +10748,7 @@ Init_ripper(void)
     ripper_init_eventids1(Ripper);
     ripper_init_eventids2(Ripper);
     /* ensure existing in symbol table */
-    rb_intern("||");
-    rb_intern("&&");
+    (void)rb_intern("||");
+    (void)rb_intern("&&");
 }
 #endif /* RIPPER */

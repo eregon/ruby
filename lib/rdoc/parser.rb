@@ -45,7 +45,7 @@ class RDoc::Parser
   class << self
 
     ##
-    # A Hash that maps file exetensions regular expressions to parsers that
+    # A Hash that maps file extensions regular expressions to parsers that
     # will consume them.
     #
     # Use parse_files_matching to register a parser's file extensions.
@@ -185,7 +185,7 @@ class RDoc::Parser
   end
 
   ##
-  # Creates a new Parser storing +top_level+, +file_name+, +content+, 
+  # Creates a new Parser storing +top_level+, +file_name+, +content+,
   # +options+ and +stats+ in instance variables.
   #
   # Usually invoked by +super+

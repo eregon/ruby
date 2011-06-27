@@ -19,7 +19,7 @@ class Gem::Ext::Builder
 
   def self.make(dest_path, results)
     unless File.exist? 'Makefile' then
-      raise Gem::InstallError, "Makefile not found:\n\n#{results.join "\n"}" 
+      raise Gem::InstallError, "Makefile not found:\n\n#{results.join "\n"}"
     end
 
     mf = File.read('Makefile')
@@ -28,7 +28,7 @@ class Gem::Ext::Builder
 
     File.open('Makefile', 'wb') {|f| f.print mf}
 
-    # try to find make program from Ruby configue arguments first
+    # try to find make program from Ruby configure arguments first
     RbConfig::CONFIG['configure_args'] =~ /with-make-prog\=(\w+)/
     make_program = $1 || ENV['make']
     unless make_program then

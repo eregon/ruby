@@ -90,7 +90,7 @@ class RDoc::Markup::FormatterTestCase < MiniTest::Unit::TestCase
 
       ##
       # Calls start_accepting which needs to verify startup state
-    
+
       def test_start_accepting
         @to.start_accepting
 
@@ -100,7 +100,7 @@ class RDoc::Markup::FormatterTestCase < MiniTest::Unit::TestCase
       ##
       # Calls end_accepting on your test case which needs to call
       # <tt>@to.end_accepting</tt> and verify document generation
-    
+
       def test_end_accepting
         @to.start_accepting
         @to.res << 'hi'
@@ -117,6 +117,16 @@ class RDoc::Markup::FormatterTestCase < MiniTest::Unit::TestCase
         @to.accept_blank_line @RM::BlankLine.new
 
         accept_blank_line
+      end
+
+      ##
+      # Test case that calls <tt>@to.accept_document</tt>
+
+      def test_accept_document
+        @to.start_accepting
+        @to.accept_document @RM::Document.new @RM::Paragraph.new 'hello'
+
+        accept_document
       end
 
       ##
@@ -196,7 +206,7 @@ class RDoc::Markup::FormatterTestCase < MiniTest::Unit::TestCase
         @to.start_accepting
 
         @to.accept_heading @RM::Heading.new(1, '\\Hello')
-        
+
         accept_heading_suppressed_crossref
       end
 

@@ -14,10 +14,6 @@
   $Id$
 =end
 
-##
-# Should we care what if somebody require this file directly?
-#require 'openssl'
-
 module OpenSSL
   class Cipher
     %w(AES CAST5 BF DES IDEA RC2 RC4 RC5).each{|name|
@@ -57,7 +53,7 @@ module OpenSSL
       return str
     end
 
-    # This class is only provided for backwards compatibility.  Use OpenSSL::Digest in the future.
+    # This class is only provided for backwards compatibility.  Use OpenSSL::Cipher in the future.
     class Cipher < Cipher
       # add warning
     end

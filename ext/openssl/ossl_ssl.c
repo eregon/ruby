@@ -16,12 +16,12 @@
 #  include <unistd.h> /* for read(), and write() */
 #endif
 
-#define numberof(ary) (int)(sizeof(ary)/sizeof(ary[0]))
+#define numberof(ary) (int)(sizeof(ary)/sizeof((ary)[0]))
 
 #ifdef _WIN32
 #  define TO_SOCKET(s) _get_osfhandle(s)
 #else
-#  define TO_SOCKET(s) s
+#  define TO_SOCKET(s) (s)
 #endif
 
 VALUE mSSL;
@@ -107,9 +107,12 @@ struct {
     OSSL_SSL_METHOD_ENTRY(TLSv1),
     OSSL_SSL_METHOD_ENTRY(TLSv1_server),
     OSSL_SSL_METHOD_ENTRY(TLSv1_client),
+#if defined(HAVE_SSLV2_METHOD) && defined(HAVE_SSLV2_SERVER_METHOD) && \
+        defined(HAVE_SSLV2_CLIENT_METHOD)
     OSSL_SSL_METHOD_ENTRY(SSLv2),
     OSSL_SSL_METHOD_ENTRY(SSLv2_server),
     OSSL_SSL_METHOD_ENTRY(SSLv2_client),
+#endif
     OSSL_SSL_METHOD_ENTRY(SSLv3),
     OSSL_SSL_METHOD_ENTRY(SSLv3_server),
     OSSL_SSL_METHOD_ENTRY(SSLv3_client),
@@ -137,12 +140,17 @@ static VALUE
 ossl_sslctx_s_alloc(VALUE klass)
 {
     SSL_CTX *ctx;
+    long mode = SSL_MODE_ENABLE_PARTIAL_WRITE;
+
+#ifdef SSL_MODE_RELEASE_BUFFERS
+    mode |= SSL_MODE_RELEASE_BUFFERS;
+#endif
 
     ctx = SSL_CTX_new(SSLv23_method());
     if (!ctx) {
         ossl_raise(eSSLError, "SSL_CTX_new:");
     }
-    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE);
+    SSL_CTX_set_mode(ctx, mode);
     SSL_CTX_set_options(ctx, SSL_OP_ALL);
     return Data_Wrap_Struct(klass, 0, ossl_sslctx_free, ctx);
 }
@@ -232,13 +240,12 @@ ossl_call_client_cert_cb(VALUE obj)
 static int
 ossl_client_cert_cb(SSL *ssl, X509 **x509, EVP_PKEY **pkey)
 {
-    VALUE obj;
-    int status, success;
+    VALUE obj, success;
 
     obj = (VALUE)SSL_get_ex_data(ssl, ossl_ssl_ex_ptr_idx);
     success = rb_protect((VALUE(*)_((VALUE)))ossl_call_client_cert_cb,
-                         obj, &status);
-    if (status || !success) return 0;
+                         obj, NULL);
+    if (!RTEST(success)) return 0;
     *x509 = DupX509CertPtr(ossl_ssl_get_x509(obj));
     *pkey = DupPKeyPtr(ossl_ssl_get_key(obj));
 
@@ -267,15 +274,14 @@ ossl_call_tmp_dh_callback(VALUE *args)
 static DH*
 ossl_tmp_dh_callback(SSL *ssl, int is_export, int keylength)
 {
-    VALUE args[3];
-    int status, success;
+    VALUE args[3], success;
 
     args[0] = (VALUE)SSL_get_ex_data(ssl, ossl_ssl_ex_ptr_idx);
     args[1] = INT2FIX(is_export);
     args[2] = INT2FIX(keylength);
     success = rb_protect((VALUE(*)_((VALUE)))ossl_call_tmp_dh_callback,
-                         (VALUE)args, &status);
-    if (status || !success) return NULL;
+                         (VALUE)args, NULL);
+    if (!RTEST(success)) return NULL;
 
     return GetPKeyPtr(ossl_ssl_get_tmp_dh(args[0]))->pkey.dh;
 }
@@ -394,13 +400,18 @@ ossl_sslctx_session_new_cb(SSL *ssl, SSL_SESSION *sess)
     ret_obj = rb_protect((VALUE(*)_((VALUE)))ossl_call_session_new_cb, ary, &state);
     if (state) {
         rb_ivar_set(ssl_obj, ID_callback_state, INT2NUM(state));
-        return 0; /* what should be returned here??? */
     }
 
-    return RTEST(ret_obj) ? 1 : 0;
+    /*
+     * return 0 which means to OpenSSL that the the session is still
+     * valid (since we created Ruby Session object) and was not freed by us
+     * with SSL_SESSION_free(). Call SSLContext#remove_session(sess) in
+     * session_get_cb block if you don't want OpenSSL to cache the session
+     * internally.
+     */
+    return 0;
 }
 
-#if 0				/* unused */
 static VALUE
 ossl_call_session_remove_cb(VALUE ary)
 {
@@ -414,7 +425,6 @@ ossl_call_session_remove_cb(VALUE ary)
 
     return rb_funcall(cb, rb_intern("call"), 1, ary);
 }
-#endif
 
 static void
 ossl_sslctx_session_remove_cb(SSL_CTX *ctx, SSL_SESSION *sess)
@@ -436,7 +446,7 @@ ossl_sslctx_session_remove_cb(SSL_CTX *ctx, SSL_SESSION *sess)
     rb_ary_push(ary, sslctx_obj);
     rb_ary_push(ary, sess_obj);
 
-    ret_obj = rb_protect((VALUE(*)_((VALUE)))ossl_call_session_new_cb, ary, &state);
+    ret_obj = rb_protect((VALUE(*)_((VALUE)))ossl_call_session_remove_cb, ary, &state);
     if (state) {
 /*
   the SSL_CTX is frozen, nowhere to save state.
@@ -487,7 +497,7 @@ ossl_call_servername_cb(VALUE ary)
         Data_Get_Struct(ret_obj, SSL_CTX, ctx2);
         SSL_set_SSL_CTX(ssl, ctx2);
     } else if (!NIL_P(ret_obj)) {
-            rb_raise(rb_eArgError, "servername_cb must return an OpenSSL::SSL::SSLContext object or nil");
+            ossl_raise(rb_eArgError, "servername_cb must return an OpenSSL::SSL::SSLContext object or nil");
     }
 
     return ret_obj;
@@ -630,7 +640,7 @@ ossl_sslctx_setup(VALUE self)
     if(!NIL_P(val)) SSL_CTX_set_timeout(ctx, NUM2LONG(val));
 
     val = ossl_sslctx_get_verify_dep(self);
-    if(!NIL_P(val)) SSL_CTX_set_verify_depth(ctx, NUM2LONG(val));
+    if(!NIL_P(val)) SSL_CTX_set_verify_depth(ctx, NUM2INT(val));
 
     val = ossl_sslctx_get_options(self);
     if(!NIL_P(val)) SSL_CTX_set_options(ctx, NUM2LONG(val));
@@ -640,7 +650,7 @@ ossl_sslctx_setup(VALUE self)
     if (!NIL_P(val)){
 	StringValue(val);
 	if (!SSL_CTX_set_session_id_context(ctx, (unsigned char *)RSTRING_PTR(val),
-					    RSTRING_LEN(val))){
+					    RSTRING_LENINT(val))){
 	    ossl_raise(eSSLError, "SSL_CTX_set_session_id_context:");
 	}
     }
@@ -946,7 +956,7 @@ ossl_sslctx_flush_sessions(int argc, VALUE *argv, VALUE self)
     } else if (rb_obj_is_instance_of(arg1, rb_cTime)) {
         tm = NUM2LONG(rb_funcall(arg1, rb_intern("to_i"), 0));
     } else {
-        rb_raise(rb_eArgError, "arg must be Time or nil");
+        ossl_raise(rb_eArgError, "arg must be Time or nil");
     }
 
     SSL_CTX_flush_sessions(ctx, (long)tm);
@@ -960,8 +970,19 @@ ossl_sslctx_flush_sessions(int argc, VALUE *argv, VALUE self)
 static void
 ossl_ssl_shutdown(SSL *ssl)
 {
+    int i, rc;
+
     if (ssl) {
-	SSL_shutdown(ssl);
+	/* 4 is from SSL_smart_shutdown() of mod_ssl.c (v2.2.19) */
+	/* It says max 2x pending + 2x data = 4 */
+	for (i = 0; i < 4; ++i) {
+	    /*
+	     * Ignore the case SSL_shutdown returns -1. Empty handshake_func
+	     * must not happen.
+	     */
+	    if (rc = SSL_shutdown(ssl))
+		break;
+	}
         SSL_clear(ssl);
     }
 }
@@ -1064,9 +1085,9 @@ ossl_ssl_setup(VALUE self)
 }
 
 #ifdef _WIN32
-#define ssl_get_error(ssl, ret) (errno = rb_w32_map_errno(WSAGetLastError()), SSL_get_error(ssl, ret))
+#define ssl_get_error(ssl, ret) (errno = rb_w32_map_errno(WSAGetLastError()), SSL_get_error((ssl), (ret)))
 #else
-#define ssl_get_error(ssl, ret) SSL_get_error(ssl, ret)
+#define ssl_get_error(ssl, ret) SSL_get_error((ssl), (ret))
 #endif
 
 static void
@@ -1233,7 +1254,7 @@ ossl_ssl_read_internal(int argc, VALUE *argv, VALUE self, int nonblock)
 	if(!nonblock && SSL_pending(ssl) <= 0)
 	    rb_thread_wait_fd(FPTR_TO_FD(fptr));
 	for (;;){
-	    nread = SSL_read(ssl, RSTRING_PTR(str), RSTRING_LEN(str));
+	    nread = SSL_read(ssl, RSTRING_PTR(str), RSTRING_LENINT(str));
 	    switch(ssl_get_error(ssl, nread)){
 	    case SSL_ERROR_NONE:
 		goto end;
@@ -1313,7 +1334,7 @@ ossl_ssl_write_internal(VALUE self, VALUE str, int nonblock)
 
     if (ssl) {
 	for (;;){
-	    nwrite = SSL_write(ssl, RSTRING_PTR(str), RSTRING_LEN(str));
+	    nwrite = SSL_write(ssl, RSTRING_PTR(str), RSTRING_LENINT(str));
 	    switch(ssl_get_error(ssl, nwrite)){
 	    case SSL_ERROR_NONE:
 		goto end;

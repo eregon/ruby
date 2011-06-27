@@ -30,9 +30,9 @@ class RDoc::Context < RDoc::CodeObject
   attr_reader :constants
 
   ##
-  # Current section of documentation
+  # Sets the current documentation section of documentation
 
-  attr_accessor :current_section
+  attr_writer :current_section
 
   ##
   # Files this context is found in
@@ -60,9 +60,9 @@ class RDoc::Context < RDoc::CodeObject
   attr_reader :requires
 
   ##
-  # Sections in this context
+  # Use this section for the next method, attribute or constant added.
 
-  attr_reader :sections
+  attr_accessor :temporary_section
 
   ##
   # Hash <tt>old_name => [aliases]</tt>, for aliases
@@ -93,12 +93,17 @@ class RDoc::Context < RDoc::CodeObject
   attr_reader :constants_hash
 
   ##
-  # A per-comment section of documentation like:
+  # A section of documentation like:
   #
   #   # :section: The title
   #   # The body
+  #
+  # Sections can be referenced multiple times and will be collapsed into a
+  # single section.
 
   class Section
+
+    include RDoc::Text
 
     ##
     # Section comment
@@ -111,11 +116,6 @@ class RDoc::Context < RDoc::CodeObject
     attr_reader :parent
 
     ##
-    # Section sequence number (for linking)
-
-    attr_reader :sequence
-
-    ##
     # Section title
 
     attr_reader :title
@@ -125,56 +125,81 @@ class RDoc::Context < RDoc::CodeObject
     ##
     # Creates a new section with +title+ and +comment+
 
-    def initialize(parent, title, comment)
+    def initialize parent, title, comment
       @parent = parent
-      @title = title
+      @title = title ? title.strip : title
 
       @@sequence.succ!
       @sequence = @@sequence.dup
 
-      set_comment comment
+      @comment = extract_comment comment
     end
 
     ##
-    # Sections are equal when they have the same #sequence
+    # Sections are equal when they have the same #title
 
-    def ==(other)
-      self.class === other and @sequence == other.sequence
-    end
-
-    def inspect # :nodoc:
-      "#<%s:0x%x %s %p>" % [
-        self.class, object_id,
-        @sequence, title
-      ]
+    def == other
+      self.class === other and @title == other.title
     end
 
     ##
-    # Set the comment for this section from the original comment block.  If
-    # the first line contains :section:, strip it and use the rest.
+    # Anchor reference for linking to this section
+
+    def aref
+      title = @title || '[untitled]'
+
+      CGI.escape(title).gsub('%', '-').sub(/^-/, '')
+    end
+
+    ##
+    # Appends +comment+ to the current comment separated by a rule.
+
+    def comment= comment
+      comment = extract_comment comment
+
+      return if comment.empty?
+
+      if @comment then
+        @comment += "\n# ---\n#{comment}"
+      else
+        @comment = comment
+      end
+    end
+
+    ##
+    # Extracts the comment for this section from the original comment block.
+    # If the first line contains :section:, strip it and use the rest.
     # Otherwise remove lines up to the line containing :section:, and look
     # for those lines again at the end and remove them. This lets us write
     #
     #   # :section: The title
     #   # The body
 
-    def set_comment(comment)
-      return unless comment
-
+    def extract_comment comment
       if comment =~ /^#[ \t]*:section:.*\n/ then
         start = $`
         rest = $'
 
-        if start.empty?
-          @comment = rest
+        if start.empty? then
+          rest
         else
-          @comment = rest.sub(/#{start.chomp}\Z/, '')
+          rest.sub(/#{start.chomp}\Z/, '')
         end
       else
-        @comment = comment
+        comment
       end
+    end
 
-      @comment = nil if @comment.empty?
+    def inspect # :nodoc:
+      "#<%s:0x%x %p>" % [self.class, object_id, title]
+    end
+
+    ##
+    # Section sequence number (deprecated)
+
+    def sequence
+      warn "RDoc::Context::Section#sequence is deprecated, use #aref"
+      @sequence
     end
 
   end
@@ -188,12 +213,12 @@ class RDoc::Context < RDoc::CodeObject
     @in_files = []
 
     @name    ||= "unknown"
-    @comment ||= ""
     @parent  = nil
     @visibility = :public
 
     @current_section = Section.new self, nil, nil
-    @sections = [@current_section]
+    @sections = { nil => @current_section }
+    @temporary_section = nil
 
     @classes = {}
     @modules = {}
@@ -265,22 +290,32 @@ class RDoc::Context < RDoc::CodeObject
     # TODO find a policy for 'attr_reader :foo' + 'def foo=()'
     register = false
 
-    if attribute.rw.index('R') then
+    key = nil
+
+    if attribute.rw.index 'R' then
       key = attribute.pretty_name
       known = @methods_hash[key]
+
       if known then
         known.comment = attribute.comment if known.comment.empty?
+      elsif registered = @methods_hash[attribute.pretty_name << '='] and
+            RDoc::Attr === registered then
+        registered.rw = 'RW'
       else
         @methods_hash[key] = attribute
         register = true
       end
     end
 
-    if attribute.rw.index('W')
+    if attribute.rw.index 'W' then
       key = attribute.pretty_name << '='
       known = @methods_hash[key]
+
       if known then
         known.comment = attribute.comment if known.comment.empty?
+      elsif registered = @methods_hash[attribute.pretty_name] and
+            RDoc::Attr === registered then
+        registered.rw = 'RW'
       else
         @methods_hash[key] = attribute
         register = true
@@ -292,6 +327,8 @@ class RDoc::Context < RDoc::CodeObject
       add_to @attributes, attribute
       resolve_aliases attribute
     end
+
+    attribute
   end
 
   ##
@@ -350,6 +387,12 @@ class RDoc::Context < RDoc::CodeObject
         enclosing = self
       end
     end
+
+    # fix up superclass
+    superclass = nil if full_name == 'BasicObject'
+    superclass = nil if full_name == 'Object' and defined?(::BasicObject)
+    superclass = '::BasicObject' if
+      defined?(::BasicObject) and full_name == 'Object'
 
     # find the superclass full name
     if superclass then
@@ -416,8 +459,8 @@ class RDoc::Context < RDoc::CodeObject
   # to +self+, and its #section to #current_section. Returns +mod+.
 
   def add_class_or_module mod, self_hash, all_hash
-    mod.section = @current_section # TODO declaring context? something is
-                                   # wrong here...
+    mod.section = current_section # TODO declaring context? something is
+                                  # wrong here...
     mod.parent = self
 
     unless @done_documenting then
@@ -434,43 +477,50 @@ class RDoc::Context < RDoc::CodeObject
   # Adds +constant+ if not already there. If it is, updates the comment,
   # value and/or is_alias_for of the known constant if they were empty/nil.
 
-  def add_constant(constant)
+  def add_constant constant
     return constant unless @document_self
 
     # HACK: avoid duplicate 'PI' & 'E' in math.c (1.8.7 source code)
     # (this is a #ifdef: should be handled by the C parser)
     known = @constants_hash[constant.name]
-    if known
-      #$stderr.puts "\nconstant #{constant.name} already registered"
+
+    if known then
       known.comment = constant.comment if known.comment.empty?
-      known.value = constant.value if known.value.nil? or known.value.strip.empty?
+
+      known.value = constant.value if
+        known.value.nil? or known.value.strip.empty?
+
       known.is_alias_for ||= constant.is_alias_for
     else
       @constants_hash[constant.name] = constant
       add_to @constants, constant
     end
+
+    constant
   end
 
   ##
   # Adds included module +include+ which should be an RDoc::Include
 
-  def add_include(include)
-    add_to @includes, include
+  def add_include include
+    add_to @includes, include unless
+      @includes.map { |i| i.full_name }.include? include.full_name
+
+    include
   end
 
   ##
   # Adds +method+ if not already there. If it is (as method or attribute),
   # updates the comment if it was empty.
 
-  def add_method(method)
+  def add_method method
     return method unless @document_self
 
     # HACK: avoid duplicate 'new' in io.c & struct.c (1.8.7 source code)
     key = method.pretty_name
     known = @methods_hash[key]
-    if known
-      # TODO issue stderr messages if --verbose
-      #$stderr.puts "\n#{display(method)} already registered as #{display(known)}"
+
+    if known then
       known.comment = method.comment if known.comment.empty?
     else
       @methods_hash[key] = method
@@ -478,6 +528,8 @@ class RDoc::Context < RDoc::CodeObject
       add_to @method_list, method
       resolve_aliases method
     end
+
+    method
   end
 
   ##
@@ -495,9 +547,10 @@ class RDoc::Context < RDoc::CodeObject
   end
 
   ##
-  # Adds an alias from +from+ (a class or module) to +name+.
+  # Adds an alias from +from+ (a class or module) to +name+ which was defined
+  # in +file+.
 
-  def add_module_alias from, name
+  def add_module_alias from, name, file
     return from if @done_documenting
 
     to_name = child_name(name)
@@ -519,7 +572,8 @@ class RDoc::Context < RDoc::CodeObject
     # HACK: register a constant for this alias:
     # constant value and comment will be updated after,
     # when the Ruby parser adds the constant
-    const = RDoc::Constant.new(name, nil, '')
+    const = RDoc::Constant.new name, nil, ''
+    const.record_location file
     const.is_alias_for = from
     add_constant const
 
@@ -540,12 +594,31 @@ class RDoc::Context < RDoc::CodeObject
   end
 
   ##
+  # Returns a section with +title+, creating it if it doesn't already exist.
+  # +comment+ will be appended to the section's comment.
+  #
+  # A section with a +title+ of +nil+ will return the default section.
+  #
+  # See also RDoc::Context::Section
+
+  def add_section title, comment
+    if section = @sections[title] then
+      section.comment = comment
+    else
+      section = Section.new self, title, comment
+      @sections[title] = section
+    end
+
+    section
+  end
+
+  ##
   # Adds +thing+ to the collection +array+
 
   def add_to(array, thing)
     array << thing if @document_self
     thing.parent = self
-    thing.section = @current_section
+    thing.section = current_section
   end
 
   ##
@@ -616,6 +689,20 @@ class RDoc::Context < RDoc::CodeObject
   end
 
   ##
+  # The current documentation section that new items will be added to.  If
+  # temporary_section is available it will be used.
+
+  def current_section
+    if section = @temporary_section then
+      @temporary_section = nil
+    else
+      section = @current_section
+    end
+
+    section
+  end
+
+  ##
   # Is part of this thing was defined in +file+?
 
   def defined_in?(file)
@@ -628,6 +715,13 @@ class RDoc::Context < RDoc::CodeObject
     else
       "method #{method_attr.pretty_name}"
     end
+  end
+
+  ##
+  # Iterator for ancestors for duck-typing.  Does nothing.  See
+  # RDoc::ClassModule#each_ancestor.
+
+  def each_ancestor # :nodoc:
   end
 
   ##
@@ -663,6 +757,28 @@ class RDoc::Context < RDoc::CodeObject
 
   def each_method # :yields: method
     @method_list.sort.each {|m| yield m}
+  end
+
+  ##
+  # Iterator for each section's contents sorted by title.  The +section+, the
+  # section's +constants+ and the sections +attributes+ are yielded.  The
+  # +constants+ and +attributes+ collections are sorted.
+  #
+  # To retrieve methods in a section use #methods_by_type with the optional
+  # +section+ parameter.
+  #
+  # NOTE: Do not edit collections yielded by this method
+
+  def each_section # :yields: section, constants, attributes
+    constants  = @constants.group_by  do |constant|  constant.section end
+    constants.default = []
+
+    attributes = @attributes.group_by do |attribute| attribute.section end
+    attributes.default = []
+
+    @sections.sort_by { |title, _| title.to_s }.each do |_, section|
+      yield section, constants[section].sort, attributes[section].sort
+    end
   end
 
   ##
@@ -872,10 +988,13 @@ class RDoc::Context < RDoc::CodeObject
   end
 
   ##
-  # Breaks method_list into a nested hash by type (class or instance) and
-  # visibility (public, protected, private)
+  # Breaks method_list into a nested hash by type (<tt>'class'</tt> or
+  # <tt>'instance'</tt>) and visibility (+:public+, +:protected+, +:private+).
+  #
+  # If +section+ is provided only methods in that RDoc::Context::Section will
+  # be returned.
 
-  def methods_by_type
+  def methods_by_type section = nil
     methods = {}
 
     TYPES.each do |type|
@@ -888,6 +1007,7 @@ class RDoc::Context < RDoc::CodeObject
     end
 
     each_method do |method|
+      next if section and not method.section == section
       methods[method.type][method.visibility] << method
     end
 
@@ -897,9 +1017,13 @@ class RDoc::Context < RDoc::CodeObject
   ##
   # Yields AnyMethod and Attr entries matching the list of names in +methods+.
 
-  def methods_matching(methods, singleton = false)
+  def methods_matching(methods, singleton = false, &block)
     (@method_list + @attributes).each do |m|
       yield m if methods.include?(m.name) and m.singleton == singleton
+    end
+
+    each_ancestor do |parent|
+      parent.methods_matching(methods, singleton, &block)
     end
   end
 
@@ -968,11 +1092,19 @@ class RDoc::Context < RDoc::CodeObject
     remove_invisible_in @attributes, min_visibility
   end
 
+  ##
+  # Only called when min_visibility == :public or :private
+
   def remove_invisible_in(array, min_visibility) # :nodoc:
     if min_visibility == :public
-      array.reject! { |e| e.visibility != :public }
+      array.reject! { |e|
+        e.visibility != :public and not e.force_documentation
+      }
     else
-      array.reject! { |e| e.visibility == :private }
+      array.reject! { |e|
+        e.visibility == :private and
+          not e.force_documentation
+      }
     end
   end
 
@@ -993,11 +1125,21 @@ class RDoc::Context < RDoc::CodeObject
   end
 
   ##
-  # Creates a new section with +title+ and +comment+
+  # Sections in this context
 
-  def set_current_section(title, comment)
-    @current_section = Section.new self, title, comment
-    @sections << @current_section
+  def sections
+    @sections.values
+  end
+
+  def sections_hash # :nodoc:
+    @sections
+  end
+
+  ##
+  # Sets the current section to a section with +title+.  See also #add_section
+
+  def set_current_section title, comment
+    @current_section = add_section title, comment
   end
 
   ##

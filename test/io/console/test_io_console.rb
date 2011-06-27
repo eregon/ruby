@@ -1,7 +1,7 @@
 begin
   require 'io/console'
-  require 'pty'
   require 'test/unit'
+  require 'pty'
 rescue LoadError
 end
 
@@ -117,7 +117,7 @@ class TestIO_Console < Test::Unit::TestCase
       s.print "a"
       s.oflush # oflush may be issued after "a" is already sent.
       s.print "b"
-      assert_includes(["b", "ab"], m.readpartial(10))
+      assert_include(["b", "ab"], m.readpartial(10))
     }
   end
 
@@ -135,7 +135,7 @@ class TestIO_Console < Test::Unit::TestCase
       s.print "a"
       s.ioflush # ioflush may be issued after "a" is already sent.
       s.print "b"
-      assert_includes(["b", "ab"], m.readpartial(10))
+      assert_include(["b", "ab"], m.readpartial(10))
     }
   end
 
@@ -146,6 +146,19 @@ class TestIO_Console < Test::Unit::TestCase
       rescue Errno::EINVAL # OpenSolaris 2009.06 TIOCGWINSZ causes Errno::EINVAL before TIOCSWINSZ.
       end
     }
+  end
+
+  if IO.console
+    def test_sync
+      assert(IO.console.sync, "console should be unbuffered")
+    end
+  else
+    def test_sync
+      r, w, pid = PTY.spawn(EnvUtil.rubybin, "-rio/console", "-e", "p IO.console.class")
+      con = r.gets.chomp
+      Process.wait(pid)
+      assert_match("File", con)
+    end
   end
 
   private
@@ -160,3 +173,31 @@ class TestIO_Console < Test::Unit::TestCase
     s.close if s
   end
 end if defined?(PTY) and defined?(IO::console)
+
+class TestIO_Console < Test::Unit::TestCase
+  require_relative '../../ruby/envutil'
+
+  case
+  when Process.respond_to?(:daemon)
+    def test_noctty
+      assert_in_out_err(["-rio/console"],
+                        "Process.daemon(true, true); p IO.console",
+                        ["nil"])
+    end
+  when !(rubyw = RbConfig::CONFIG["RUBYW_INSTALL_NAME"]).empty?
+    require 'tempfile'
+    dir, base = File.split(EnvUtil.rubybin)
+    RUBYW = File.join(dir, base.sub(/ruby/, rubyw))
+
+    def test_noctty
+      t = Tempfile.new("console")
+      t.close
+      cmd = [RUBYW, '-rio/console', '-e', 'STDOUT.reopen(ARGV[0]); p IO.console', '--', t.path]
+      system(*cmd)
+      t.open
+      assert_equal("nil", t.gets.chomp)
+    ensure
+      t.close! if t and !t.closed?
+    end
+  end
+end if defined?(IO.console)

@@ -12,6 +12,7 @@
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
 #include "ruby/util.h"
+#include "internal.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -77,8 +78,6 @@ const unsigned char rb_nan[] = "\x00\x00\xc0\x7f";
 const unsigned char rb_nan[] = "\x7f\xc0\x00\x00";
 #endif
 
-extern double round(double);
-
 #ifndef HAVE_ROUND
 double
 round(double x)
@@ -96,6 +95,10 @@ round(double x)
     return x;
 }
 #endif
+
+static VALUE fix_uminus(VALUE num);
+static VALUE fix_mul(VALUE x, VALUE y);
+static VALUE int_pow(long x, unsigned long y);
 
 static ID id_coerce, id_to_i, id_eq;
 
@@ -569,7 +572,7 @@ num_to_int(VALUE num)
  *
  *  Floating point has a different arithmetic and is a inexact number.
  *  So you should know its esoteric system. see following:
- *  
+ *
  *  - http://docs.sun.com/source/806-3568/ncg_goldberg.html
  *  - http://wiki.github.com/rdp/ruby_tutorials_core/ruby-talk-faq#floats_imprecise
  *  - http://en.wikipedia.org/wiki/Floating_point#Accuracy_problems
@@ -665,7 +668,15 @@ flo_to_s(VALUE flt)
 }
 
 /*
- * MISSING: documentation
+ *  call-seq:
+ *     flt.coerce(numeric)  ->  array
+ *
+ *  Returns an array with both <i>aNumeric</i> and <i>flt</i> represented
+ *  as <code>Float</code> objects.
+ *  This is achieved by converting <i>aNumeric</i> to a <code>Float</code>.
+ *
+ *     1.2.coerce(3)       #=> [3.0, 1.2]
+ *     2.5.coerce(1.1)     #=> [1.1, 2.5]
  */
 
 static VALUE
@@ -1479,23 +1490,33 @@ flo_round(int argc, VALUE *argv, VALUE num)
 {
     VALUE nd;
     double number, f;
-    int ndigits = 0, i;
+    int ndigits = 0;
     long val;
 
     if (argc > 0 && rb_scan_args(argc, argv, "01", &nd) == 1) {
 	ndigits = NUM2INT(nd);
     }
     number  = RFLOAT_VALUE(num);
-    f = 1.0;
-    i = abs(ndigits);
-    while  (--i >= 0)
-	f = f*10.0;
+    f = pow(10, abs(ndigits));
 
     if (isinf(f)) {
 	if (ndigits < 0) number = 0;
     }
     else {
-	if (ndigits < 0) number /= f;
+	if (ndigits < 0) {
+	    double absnum = fabs(number);
+	    if (absnum < f) return INT2FIX(0);
+	    if (!FIXABLE(number)) {
+		VALUE f10 = int_pow(10, -ndigits);
+		VALUE n10 = f10;
+		if (number < 0) {
+		    f10 = FIXNUM_P(f10) ? fix_uminus(f10) : rb_big_uminus(f10);
+		}
+		num = rb_big_idiv(rb_dbl2big(absnum), n10);
+		return FIXNUM_P(num) ? fix_mul(num, f10) : rb_big_mul(num, f10);
+	    }
+	    number /= f;
+	}
 	else number *= f;
 	number = round(number);
 	if (ndigits < 0) number *= f;
@@ -1626,7 +1647,7 @@ ruby_float_step(VALUE from, VALUE to, VALUE step, int excl)
 	else {
 	    if (err>0.5) err=0.5;
 	    n = floor(n + err);
-	    if (!excl) n++;
+	    if (!excl || ((long)n)*unit+beg < end) n++;
 	    for (i=0; i<n; i++) {
 		rb_yield(DBL2NUM(i*unit+beg));
 	    }
@@ -2097,7 +2118,7 @@ rb_enc_uint_chr(unsigned int code, rb_encoding *enc)
     int n;
     VALUE str;
     if ((n = rb_enc_codelen(code, enc)) <= 0) {
-	rb_raise(rb_eRangeError, "%d out of char range", code);
+	rb_raise(rb_eRangeError, "%u out of char range", code);
     }
     str = rb_enc_str_new(0, n, enc);
     rb_enc_mbcput(code, RSTRING_PTR(str), enc);
@@ -2174,8 +2195,7 @@ int_chr(int argc, VALUE *argv, VALUE num)
  */
 
 static VALUE
-int_ord(num)
-    VALUE num;
+int_ord(VALUE num)
 {
     return num;
 }
@@ -2364,7 +2384,7 @@ fix_mul(VALUE x, VALUE y)
 #if SIZEOF_LONG * 2 <= SIZEOF_LONG_LONG
 	LONG_LONG d;
 #else
-	long c;
+	volatile long c;
 	VALUE r;
 #endif
 
@@ -2425,8 +2445,6 @@ fixdivmod(long x, long y, long *divp, long *modp)
     if (modp) *modp = mod;
 }
 
-VALUE rb_big_fdiv(VALUE x, VALUE y);
-
 /*
  *  call-seq:
  *     fix.fdiv(numeric)  ->  float
@@ -2454,8 +2472,6 @@ fix_fdiv(VALUE x, VALUE y)
 	return rb_num_coerce_bin(x, y, rb_intern("fdiv"));
     }
 }
-
-VALUE rb_rational_reciprocal(VALUE x);
 
 static VALUE
 fix_divide(VALUE x, VALUE y, ID op)
@@ -2615,7 +2631,7 @@ int_pow(long x, unsigned long y)
 	    y >>= 1;
 	}
 	{
-	    long xz = x * z;
+	    volatile long xz = x * z;
 	    if (!POSFIXABLE(xz) || xz / x != z) {
 		goto bignum;
 	    }

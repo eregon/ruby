@@ -175,7 +175,7 @@ code_to_mbc(OnigCodePoint code, UChar *buf, OnigEncoding enc)
   if (enclen(enc, buf) != (p - buf))
     return REGERR_INVALID_CODE_POINT_VALUE;
 #endif
-  return p - buf;
+  return (int)(p - buf);
 }
 
 static int
@@ -208,7 +208,7 @@ is_mbc_ambiguous(OnigCaseFoldType flag,
 		 const UChar** pp, const UChar* end)
 {
   return onigenc_mbn_is_mbc_ambiguous(enc, flag, pp, end);
-                                      
+
 }
 #endif
 
@@ -243,7 +243,7 @@ left_adjust_char_head(const UChar* start, const UChar* s, const UChar* end, Onig
 	p++;
 	break;
       }
-    } 
+    }
   }
   len = enclen(enc, p, end);
   if (p + len > s) return (UChar* )p;
@@ -382,7 +382,6 @@ OnigEncodingDefine(shift_jis, Shift_JIS) = {
  * Link: http://www.iana.org/assignments/character-sets
  * Link: http://ja.wikipedia.org/wiki/Shift_JIS
  */
-ENC_ALIAS("SJIS", "Shift_JIS")
 
 /*
  * Name: Windows-31J
@@ -391,10 +390,27 @@ ENC_ALIAS("SJIS", "Shift_JIS")
  * Link: http://www.microsoft.com/globaldev/reference/dbcs/932.mspx
  * Link: http://ja.wikipedia.org/wiki/Windows-31J
  * Link: http://source.icu-project.org/repos/icu/data/trunk/charset/data/ucm/windows-932-2000.ucm
+ *
+ * Windows Standard Character Set and its mapping to Unicode by Microsoft.
+ * Since 1.9.3, SJIS is the alias of Windows-31J because its character
+ * set is usually this one even if its mapping may differ.
  */
 ENC_REPLICATE("Windows-31J", "Shift_JIS")
 ENC_ALIAS("CP932", "Windows-31J")
 ENC_ALIAS("csWindows31J", "Windows-31J") /* IANA.  IE6 don't accept Windows-31J but csWindows31J. */
+ENC_ALIAS("SJIS", "Windows-31J")
+
+/*
+ * Name: PCK
+ * Link: http://download.oracle.com/docs/cd/E19253-01/819-0606/x-2chn0/index.html
+ * Link: http://download.oracle.com/docs/cd/E19253-01/819-0606/appb-pckwarn-1/index.html
+ *
+ * Solaris's SJIS variant. Its set is Windows Standard Character Set; it
+ * consists JIS X 0201 Latin (US-ASCII), JIS X 0201 Katakana, JIS X 0208, NEC
+ * special characters, NEC-selected IBM extended characters, and IBM extended
+ * characters. Solaris's iconv seems to use SJIS-open.
+ */
+ENC_ALIAS("PCK", "Windows-31J")
 
 /*
  * Name: MacJapanese

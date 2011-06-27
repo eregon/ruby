@@ -136,7 +136,7 @@ module IRB
     end
 
     # @param paths load paths in which IRB find a localized file.
-    # @param dir directory 
+    # @param dir directory
     # @param file basename to be localized
     #
     # typically, for the parameters and a <path> in paths, it searches
@@ -147,7 +147,7 @@ module IRB
           full_path = File.join(libpath, lc_path)
           return full_path if File.readable?(full_path)
         end
-        redo if Gem.try_activate(lc_path)
+        redo if defined?(Gem) and Gem.try_activate(lc_path)
       end
       nil
     end

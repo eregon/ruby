@@ -1,3 +1,5 @@
+# coding: utf-8
+
 require 'tempfile'
 require 'rubygems'
 require 'minitest/autorun'
@@ -46,6 +48,30 @@ contents of a string.
     assert_equal expected, content
   end
 
+  def test_include_file_encoding_incompatible
+    skip "Encoding not implemented" unless Object.const_defined? :Encoding
+
+    @tempfile.write <<-INCLUDE
+# -*- mode: rdoc; coding: utf-8; fill-column: 74; -*-
+
+π
+    INCLUDE
+
+    @tempfile.flush
+    @tempfile.rewind
+
+    content = @pp.include_file @file_name, '', Encoding::US_ASCII
+
+    expected = "?\n"
+
+    # FIXME 1.9 fix on windoze
+    # preprocessor uses binread, so line endings are \r\n
+    expected.gsub!("\n", "\r\n") if
+      RUBY_VERSION =~ /^1.9/ && RUBY_PLATFORM =~ /mswin|mingw/
+
+    assert_equal expected, content
+  end
+
   def test_handle
     text = "# :x: y\n"
     out = @pp.handle text
@@ -68,6 +94,17 @@ contents of a string.
     end
 
     assert_equal "", text
+  end
+
+  def test_handle_category
+    context = RDoc::Context.new
+    original_section = context.current_section
+
+    text = "# :category: other\n"
+
+    @pp.handle text, context
+
+    refute_equal original_section, context.current_section
   end
 
   def test_handle_code_object

@@ -44,7 +44,7 @@ class RDoc::Markup::ToRdoc < RDoc::Markup::Formatter
   ##
   # Creates a new formatter that will output (mostly) \RDoc markup
 
-  def initialize
+  def initialize markup = nil
     super
 
     @markup.add_special(/\\\S/, :SUPPRESSED_CROSSREF)
@@ -172,6 +172,15 @@ class RDoc::Markup::ToRdoc < RDoc::Markup::Formatter
   end
 
   ##
+  # Adds +paragraph+ to the output
+
+  def accept_indented_paragraph paragraph
+    @indent += paragraph.indent
+    wrap attributes(paragraph.text)
+    @indent -= paragraph.indent
+  end
+
+  ##
   # Adds +raw+ to the output
 
   def accept_raw raw
@@ -217,7 +226,7 @@ class RDoc::Markup::ToRdoc < RDoc::Markup::Formatter
   end
 
   ##
-  # Removes preceeding \\ from the suppressed crossref +special+
+  # Removes preceding \\ from the suppressed crossref +special+
 
   def handle_special_SUPPRESSED_CROSSREF special
     text = special.text

@@ -243,7 +243,7 @@ class TestThread < Test::Unit::TestCase
     end
     t1.kill
     t2.kill
-    # assert_operator(c1, :>, c2, "[ruby-dev:33124]") # not guaranteed
+    assert_operator(c1, :>, c2, "[ruby-dev:33124]") # not guaranteed
   end
 
   def test_new
@@ -298,6 +298,24 @@ class TestThread < Test::Unit::TestCase
       Thread.kill Thread.current
       p 2
     INPUT
+  end
+
+  def test_kill_wrong_argument
+    bug4367 = '[ruby-core:35086]'
+    assert_raise(TypeError, bug4367) {
+      Thread.kill(nil)
+    }
+    o = Object.new
+    assert_raise(TypeError, bug4367) {
+      Thread.kill(o)
+    }
+  end
+
+  def test_kill_thread_subclass
+    c = Class.new(Thread)
+    t = c.new { sleep 10 }
+    assert_nothing_raised { Thread.kill(t) }
+    assert_equal(nil, t.value)
   end
 
   def test_exit
@@ -384,7 +402,7 @@ class TestThread < Test::Unit::TestCase
       end
     INPUT
 
-    assert_in_out_err(%w(--disable-gems -d), <<-INPUT, %w(false 2), /.+/)
+    assert_in_out_err(%w(--disable-gems -d), <<-INPUT, %w(false 2), %r".+")
       p Thread.abort_on_exception
       begin
         Thread.new { raise }
@@ -576,6 +594,15 @@ class TestThread < Test::Unit::TestCase
     end
     assert_nothing_raised {arr.hash}
     assert(obj[:visited])
+  end
+
+  def test_thread_instance_variable
+    bug4389 = '[ruby-core:35192]'
+    assert_in_out_err([], <<-INPUT, %w(), [], bug4389)
+      class << Thread.current
+        @data = :data
+      end
+    INPUT
   end
 end
 
