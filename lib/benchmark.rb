@@ -175,8 +175,9 @@ module Benchmark
     Array === results and results.grep(Tms).each {|t|
       print((labels.shift || t.label || "").ljust(label_width), t.format(format))
     }
-    STDOUT.sync = sync
     report.list
+  ensure
+    STDOUT.sync = sync unless sync.nil?
   end
 
 
