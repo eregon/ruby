@@ -106,7 +106,7 @@ class PPInspectTest < Test::Unit::TestCase
     def a.to_s() "aaa" end
     a.instance_eval { @a = nil }
     result = PP.pp(a, '')
-    assert_equal("#{a.inspect}\n", result)
+    assert_equal("#{a.to_s}\n", result)
     a = 1.0
     a.instance_eval { @a = nil }
     result = PP.pp(a, '')
@@ -117,7 +117,7 @@ class PPInspectTest < Test::Unit::TestCase
     a = Object.new
     def a.to_s() "aaa" end
     result = PP.pp(a, '')
-    assert_equal("#{a.inspect}\n", result)
+    assert_equal("#{a.to_s}\n", result)
     assert_equal("aaa\n", result)
   end
 end
