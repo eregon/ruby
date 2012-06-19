@@ -169,7 +169,7 @@ module Benchmark
     label_width ||= 0
     label_width += 1
     format ||= FORMAT
-    print ' '*label_width + caption
+    print ' '*label_width + caption unless caption.empty?
     report = Report.new(label_width, format)
     results = yield(report)
     Array === results and results.grep(Tms).each {|t|

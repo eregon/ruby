@@ -60,6 +60,10 @@ describe Benchmark do
   end
 
   describe 'benchmark' do
+    it 'does not print any space if the given caption is empty' do
+      capture_bench_output(:benchmark).must_equal BENCHMARK_OUTPUT_MINIMAL
+    end
+
     it 'makes extra calcultations with an Array at the end of the benchmark and show the result' do
       capture_bench_output(:benchmark,
         Benchmark::CAPTION, 7,
@@ -160,4 +164,10 @@ times:    --time--   --time--   --time-- (  --time--)
 upto:     --time--   --time--   --time-- (  --time--)
 >total:   --time--   --time--   --time-- (  --time--)
 >avg:     --time--   --time--   --time-- (  --time--)
+BENCH
+
+BENCHMARK_OUTPUT_MINIMAL = <<BENCH
+first  --time--   --time--   --time-- (  --time--)
+second  --time--   --time--   --time-- (  --time--)
+third  --time--   --time--   --time-- (  --time--)
 BENCH
