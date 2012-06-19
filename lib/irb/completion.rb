@@ -39,6 +39,14 @@ module IRB
 #      puts "input: #{input}"
 
       case input
+      when /^((["'`]).*\2)\.([^.]*)$/
+	# String
+	receiver = $1
+	message = $3
+
+	candidates = String.instance_methods.collect{|m| m.to_s}
+	select_message(receiver, message, candidates)
+
       when /^(\/[^\/]*\/)\.([^.]*)$/
 	# Regexp
 	receiver = $1
@@ -170,8 +178,12 @@ module IRB
 	    rescue Exception
 	      name = ""
 	    end
-	    next if name != "IRB::Context" and
-	      /^(IRB|SLex|RubyLex|RubyToken)/ =~ name
+            begin
+              next if name != "IRB::Context" and
+                /^(IRB|SLex|RubyLex|RubyToken)/ =~ name
+            rescue Exception
+              next
+            end
 	    candidates.concat m.instance_methods(false).collect{|x| x.to_s}
 	  }
 	  candidates.sort!
@@ -214,7 +226,8 @@ module IRB
 end
 
 if Readline.respond_to?("basic_word_break_characters=")
-  Readline.basic_word_break_characters= " \t\n\"\\'`><=;|&{("
+#  Readline.basic_word_break_characters= " \t\n\"\\'`><=;|&{("
+  Readline.basic_word_break_characters= " \t\n`><=;|&{("
 end
 Readline.completion_append_character = nil
 Readline.completion_proc = IRB::InputCompletor::CompletionProc

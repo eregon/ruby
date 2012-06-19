@@ -1,14 +1,17 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems/version"
 
 ##
 # A Requirement is a set of one or more version restrictions. It supports a
 # few (<tt>=, !=, >, <, >=, <=, ~></tt>) different restriction operators.
+
+# REFACTOR: The fact that a requirement is singular or plural is kind of
+# awkward. Is Requirement the right name for this? Or should it be one
+# [op, number] pair, and we call the list of requirements something else?
+# Since a Requirement is held by a Dependency, maybe this should be made
+# singular and the list aspect should be pulled up into Dependency?
+
+require "rubygems/version"
+require "rubygems/deprecate"
 
 class Gem::Requirement
   include Comparable
@@ -116,11 +119,27 @@ class Gem::Requirement
   end
 
   def marshal_dump # :nodoc:
+    fix_syck_default_key_in_requirements
+
     [@requirements]
   end
 
   def marshal_load array # :nodoc:
     @requirements = array[0]
+
+    fix_syck_default_key_in_requirements
+  end
+
+  def yaml_initialize(tag, vals) # :nodoc:
+    vals.each do |ivar, val|
+      instance_variable_set "@#{ivar}", val
+    end
+
+    fix_syck_default_key_in_requirements
+  end
+
+  def init_with coder # :nodoc:
+    yaml_initialize coder.tag, coder.map
   end
 
   def prerelease?
@@ -159,6 +178,19 @@ class Gem::Requirement
 
   def <=> other # :nodoc:
     to_s <=> other.to_s
+  end
+
+  private
+
+  def fix_syck_default_key_in_requirements
+    Gem.load_yaml
+
+    # Fixup the Syck DefaultKey bug
+    @requirements.each do |r|
+      if r[0].kind_of? Gem::SyckDefaultKey
+        r[0] = "="
+      end
+    end
   end
 end
 

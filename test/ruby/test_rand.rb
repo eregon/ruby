@@ -340,10 +340,14 @@ END
   end
 
   def test_random_bytes
-    r = Random.new(0)
+    assert_random_bytes(Random.new(0))
+  end
+
+  def assert_random_bytes(r)
     assert_equal("", r.bytes(0))
     assert_equal("\xAC".force_encoding("ASCII-8BIT"), r.bytes(1))
-    assert_equal("/\xAA\xC4\x97u\xA6\x16\xB7\xC0\xCC".force_encoding("ASCII-8BIT"),                                                                                                                              r.bytes(10))
+    assert_equal("/\xAA\xC4\x97u\xA6\x16\xB7\xC0\xCC".force_encoding("ASCII-8BIT"),
+                 r.bytes(10))
   end
 
   def test_random_range
@@ -411,12 +415,41 @@ END
 
   def test_fork_shuffle
     pid = fork do
-        (1..10).to_a.shuffle
-        raise 'default seed is not set' if srand == 0
+      (1..10).to_a.shuffle
+      raise 'default seed is not set' if srand == 0
     end
     p2, st = Process.waitpid2(pid)
     assert(st.success?, "#{st.inspect}")
   rescue NotImplementedError, ArgumentError
+  end
+
+  def assert_fork_status(n, mesg, &block)
+    IO.pipe do |r, w|
+      (1..n).map do
+        p1 = fork {w.puts(block.call.to_s)}
+        _, st = Process.waitpid2(p1)
+        assert_send([st, :success?], mesg)
+        r.gets.strip
+      end
+    end
+  end
+
+  def test_rand_reseed_on_fork
+    bug5661 = '[ruby-core:41209]'
+
+    assert_fork_status(1, bug5661) {Random.rand(4)}
+    r1, r2 = *assert_fork_status(2, bug5661) {Random.rand}
+    assert_not_equal(r1, r2, bug5661)
+
+    assert_fork_status(1, bug5661) {rand(4)}
+    r1, r2 = *assert_fork_status(2, bug5661) {rand}
+    assert_not_equal(r1, r2, bug5661)
+
+    stable = Random.new
+    assert_fork_status(1, bug5661) {stable.rand(4)}
+    r1, r2 = *assert_fork_status(2, bug5661) {stable.rand}
+    assert_equal(r1, r2, bug5661)
+  rescue NotImplementedError
   end
 
   def test_seed

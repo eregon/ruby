@@ -121,28 +121,24 @@ def foreach_proc_entry
 end
 
 def gencallback(ty, calltype, proc_entry, argc, n)
-  <<-EOS
+  dltype = DLTYPE[ty]
+  ret = dltype[:conv]
+  src = <<-EOS
 #{calltype == STDCALL ? "\n#ifdef FUNC_STDCALL" : ""}
-static #{DLTYPE[ty][:type]}
-FUNC_#{calltype.upcase}(#{func_name(ty,argc,n,calltype)})(#{(0...argc).collect{|i| "DLSTACK_TYPE stack" + i.to_s}.join(", ")})
+static #{dltype[:type]}
+FUNC_#{calltype.upcase}(#{func_name(ty,argc,n,calltype)})(#{(0...argc).collect{|i| "DLSTACK_TYPE stack#{i}"}.join(", ")})
 {
-    VALUE ret, cb#{argc > 0 ? ", args[#{argc}]" : ""};
+    VALUE #{ret ? "ret, " : ""}cb#{argc > 0 ? ", args[#{argc}]" : ""};
 #{
-      sizeof_voidp = [""].pack('p').size
-      sizeof_long = [0].pack('l!').size
       (0...argc).collect{|i|
-        if sizeof_voidp == sizeof_long
-          "    args[%d] = LONG2NUM(stack%d);" % [i,i]
-        elsif sizeof_voidp == 8 # should get sizeof_long_long...
-          "    args[%d] = LL2NUM(stack%d);" % [i,i]
-        else
-          raise "unknown size of void*"
-        end
-      }.join("\n")
+        "\n    args[#{i}] = PTR2NUM(stack#{i});"
+      }.join("")
 }
     cb = rb_ary_entry(rb_ary_entry(#{proc_entry}, #{ty}), #{(n * DLSTACK_SIZE) + argc});
-    ret = rb_funcall2(cb, rb_dl_cb_call, #{argc}, #{argc > 0 ? 'args' : 'NULL'});
-    return #{DLTYPE[ty][:conv] ? DLTYPE[ty][:conv] % "ret" : ""};
+    #{ret ? "ret = " : ""}rb_funcall2(cb, rb_dl_cb_call, #{argc}, #{argc > 0 ? 'args' : 'NULL'});
+  EOS
+  src << "    return #{ret % "ret"};\n" if ret
+  src << <<-EOS
 }
 #{calltype == STDCALL ? "#endif\n" : ""}
   EOS

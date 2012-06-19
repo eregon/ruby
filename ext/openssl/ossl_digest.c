@@ -68,7 +68,9 @@ ossl_digest_new(const EVP_MD *md)
 
     ret = ossl_digest_alloc(cDigest);
     GetDigest(ret, ctx);
-    EVP_DigestInit_ex(ctx, md, NULL);
+    if (EVP_DigestInit_ex(ctx, md, NULL) != 1) {
+	ossl_raise(eDigestError, "Digest initialization failed.");
+    }
 
     return ret;
 }
@@ -122,7 +124,9 @@ ossl_digest_initialize(int argc, VALUE *argv, VALUE self)
     if (!NIL_P(data)) StringValue(data);
 
     GetDigest(self, ctx);
-    EVP_DigestInit_ex(ctx, md, NULL);
+    if (EVP_DigestInit_ex(ctx, md, NULL) != 1) {
+	ossl_raise(eDigestError, "Digest initialization failed.");
+    }
 
     if (!NIL_P(data)) return ossl_digest_update(self, data);
     return self;
@@ -159,7 +163,9 @@ ossl_digest_reset(VALUE self)
     EVP_MD_CTX *ctx;
 
     GetDigest(self, ctx);
-    EVP_DigestInit_ex(ctx, EVP_MD_CTX_md(ctx), NULL);
+    if (EVP_DigestInit_ex(ctx, EVP_MD_CTX_md(ctx), NULL) != 1) {
+	ossl_raise(eDigestError, "Digest initialization failed.");
+    }
 
     return self;
 }
@@ -397,6 +403,17 @@ Init_ossl_digest()
      *   sha256 << data2
      *   sha256 << data3
      *   digest = sha256.digest
+     *
+     * === Reuse a Digest instance
+     *
+     *   data1 = File.read('file1')
+     *   sha256 = OpenSSL::Digest::SHA256.new
+     *   digest1 = sha256.digest(data1)
+     *
+     *   data2 = File.read('file2')
+     *   sha256.reset
+     *   digest2 = sha256.digest(data2)
+     *
      */
     cDigest = rb_define_class_under(mOSSL, "Digest", rb_path2class("Digest::Class"));
     /* Document-class: OpenSSL::Digest::DigestError

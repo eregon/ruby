@@ -1,14 +1,18 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/security'
 require 'rubygems/fix_openssl_warnings' if RUBY_VERSION < "1.9"
 
 class TestGemSecurity < Gem::TestCase
+
+  def setup
+    super
+    Gem::Security::OPT[:trust_dir] = File.join(Gem.user_home, '.gem', 'trust')
+  end
+
+  def teardown
+    super
+    Gem::Security::OPT[:trust_dir] = File.join(Gem.user_home, '.gem', 'trust')
+  end
 
   def test_class_build_cert
     name = OpenSSL::X509::Name.parse "CN=nobody/DC=example"

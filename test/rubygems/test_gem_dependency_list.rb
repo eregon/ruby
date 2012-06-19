@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/dependency_list'
 
@@ -34,7 +28,7 @@ class TestGemDependencyList < Gem::TestCase
     util_clear_gems
     install_specs @a1, @b2
 
-    deps = Deprecate.skip_during { Gem::DependencyList.from_source_index }
+    deps = Gem::Deprecate.skip_during { Gem::DependencyList.from_source_index }
 
     assert_equal %w[b-2 a-1], deps.dependency_order.map { |s| s.full_name }
   end

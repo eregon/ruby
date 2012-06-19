@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 module Gem
 
   # TODO: move this whole file back into rubygems.rb
@@ -47,6 +41,13 @@ module Gem
            end
 
     @default_dir ||= File.join(*path)
+  end
+
+  ##
+  # Paths where RubyGems' .rb files and bin files are installed
+
+  def self.default_rubygems_dirs
+    nil # default to standard layout
   end
 
   ##

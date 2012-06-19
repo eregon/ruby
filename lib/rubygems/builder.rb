@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -38,9 +32,9 @@ class Gem::Builder
   # Builds the gem from the specification.  Returns the name of the file
   # written.
 
-  def build
+  def build(skip_validation=false)
     @spec.mark_version
-    @spec.validate
+    @spec.validate unless skip_validation
     @signer = sign
     write_package
     say success if Gem.configuration.verbose

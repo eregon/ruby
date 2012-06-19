@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 at_exit { $SAFE = 1 }
 
 if defined? Gem::QuickLoader
@@ -249,7 +243,7 @@ class Gem::TestCase < MiniTest::Unit::TestCase
   ##
   # Builds and installs the Gem::Specification +spec+
 
-  def install_gem spec
+  def install_gem spec, options = {}
     require 'rubygems/installer'
 
     use_ui Gem::MockGemUi.new do
@@ -260,7 +254,14 @@ class Gem::TestCase < MiniTest::Unit::TestCase
 
     gem = File.join(@tempdir, File.basename(spec.cache_file)).untaint
 
-    Gem::Installer.new(gem, :wrappers => true).install
+    Gem::Installer.new(gem, options.merge({:wrappers => true})).install
+  end
+
+  ##
+  # Builds and installs the Gem::Specification +spec+ into the user dir
+
+  def install_gem_user spec
+    install_gem spec, :user_install => true
   end
 
   ##
@@ -486,8 +487,11 @@ class Gem::TestCase < MiniTest::Unit::TestCase
 
     if deps then
       block = proc do |s|
-        deps.each do |n, req|
-          s.add_dependency n, (req || '>= 0')
+        # Since Hash#each is unordered in 1.8, sort
+        # the keys and iterate that way so the tests are
+        # deteriminstic on all implementations.
+        deps.keys.sort.each do |n|
+          s.add_dependency n, (deps[n] || '>= 0')
         end
       end
     end
@@ -507,8 +511,11 @@ class Gem::TestCase < MiniTest::Unit::TestCase
 
     if deps then
       block = proc do |s|
-        deps.each do |n, req|
-          s.add_dependency n, (req || '>= 0')
+        # Since Hash#each is unordered in 1.8, sort
+        # the keys and iterate that way so the tests are
+        # deteriminstic on all implementations.
+        deps.keys.sort.each do |n|
+          s.add_dependency n, (deps[n] || '>= 0')
         end
       end
     end
@@ -684,12 +691,13 @@ Also, a list:
     end
 
     v = Gem.marshal_version
+
     Gem::Specification.each do |spec|
       path = "#{@gem_repo}quick/Marshal.#{v}/#{spec.original_name}.gemspec.rz"
       data = Marshal.dump spec
       data_deflate = Zlib::Deflate.deflate data
       @fetcher.data[path] = data_deflate
-    end
+    end unless Gem::RemoteFetcher === @fetcher # HACK for test_download_to_cache
 
     nil # force errors
   end
@@ -860,4 +868,3 @@ Also, a list:
   end
 
 end
-

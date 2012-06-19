@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/format'
 require 'rubygems/installer'
@@ -100,10 +94,14 @@ extensions.
       end
 
       # TODO use installer options
+      install_defaults = Gem::ConfigFile::PLATFORM_DEFAULTS['install']
+      installer_env_shebang = install_defaults.to_s['--env-shebang']
+      
       installer = Gem::Installer.new(gem,
                                      :wrappers => true,
                                      :force => true,
-                                     :install_dir => spec.base_dir)
+                                     :install_dir => spec.base_dir,
+                                     :env_shebang => installer_env_shebang)
       installer.install
 
       say "Restored #{spec.full_name}"

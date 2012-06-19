@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/ext'
 
@@ -52,13 +46,13 @@ class TestGemExtConfigureBuilder < Gem::TestCase
       end
     end
 
-    shell_error_msg = %r{(\./configure: .*)|(Can't open \./configure(?:: No such file or directory)?)}
+    shell_error_msg = %r{(\./configure: .*)|((?:Can't|cannot) open \./configure(?:: No such file or directory)?)}
     sh_prefix_configure = "sh ./configure --prefix="
 
     expected = %r(configure failed:
 
 #{Regexp.escape sh_prefix_configure}#{Regexp.escape @dest_path}
-.*?: #{shell_error_msg}
+(?:.*?: )?#{shell_error_msg}
 )
 
     assert_match expected, error.message

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'webrick'
 require 'zlib'
 require 'erb'
@@ -468,7 +462,7 @@ div.method-source-code pre { color: #ffdead; overflow: hidden; }
 
     add_date res
 
-    index = Deprecate.skip_during { Marshal.dump Gem.source_index }
+    index = Gem::Deprecate.skip_during { Marshal.dump Gem.source_index }
 
     if req.request_method == 'HEAD' then
       res['content-length'] = index.length

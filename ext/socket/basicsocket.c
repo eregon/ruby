@@ -247,7 +247,7 @@ bsock_setsockopt(int argc, VALUE *argv, VALUE sock)
 	break;
     }
 
-#define rb_sys_fail_path(path) rb_sys_fail(NIL_P(path) ? 0 : RSTRING_PTR(path))
+#define rb_sys_fail_path(path) rb_sys_fail_str(path)
 
     rb_io_check_closed(fptr);
     if (setsockopt(fptr->fd, level, option, v, vlen) < 0)
@@ -732,12 +732,14 @@ bsock_do_not_rev_lookup_set(VALUE self, VALUE val)
     return val;
 }
 
-/*
- * BasicSocket is the super class for the all socket classes.
- */
 void
 rsock_init_basicsocket(void)
 {
+    /*
+     * Document-class: BasicSocket < IO
+     *
+     * BasicSocket is the super class for all the Socket classes.
+     */
     rb_cBasicSocket = rb_define_class("BasicSocket", rb_cIO);
     rb_undef_method(rb_cBasicSocket, "initialize");
 

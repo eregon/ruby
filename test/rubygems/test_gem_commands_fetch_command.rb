@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/package'
 require 'rubygems/security'
@@ -60,6 +54,31 @@ class TestGemCommandsFetchCommand < Gem::TestCase
   end
 
   def test_execute_version
+    util_setup_fake_fetcher
+    util_setup_spec_fetcher @a1, @a2
+
+    @fetcher.data["#{@gem_repo}gems/#{@a1.file_name}"] =
+      File.read(@a1.cache_file)
+
+    @cmd.options[:args] = [@a2.name]
+    @cmd.options[:version] = Gem::Requirement.new '1'
+
+    use_ui @ui do
+      Dir.chdir @tempdir do
+        @cmd.execute
+      end
+    end
+
+    assert File.exist?(File.join(@tempdir, @a1.file_name)),
+           "#{@a1.full_name} not fetched"
+  end
+
+  def test_execute_handles_sources_properly
+    repo = "http://gems.example.com"
+    @uri = URI.parse repo
+
+    Gem.sources.replace [repo]
+
     util_setup_fake_fetcher
     util_setup_spec_fetcher @a1, @a2
 

@@ -1,14 +1,8 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/cleanup_command'
 
 class TestGemCommandsCleanupCommand < Gem::TestCase
-
+  
   def setup
     super
 
@@ -43,6 +37,44 @@ class TestGemCommandsCleanupCommand < Gem::TestCase
     refute_path_exists @a_1.gem_dir
     refute_path_exists @b_1.gem_dir
   end
+
+  def test_execute_all_user
+    @a_1_1 = quick_spec 'a', '1.1'
+    @a_1_1 = install_gem_user @a_1_1 # pick up user install path
+
+    Gem::Specification.dirs = [Gem.dir, Gem.user_dir]
+
+    assert_path_exists @a_1.gem_dir
+    assert_path_exists @a_1_1.gem_dir
+
+    @cmd.options[:args] = %w[a]
+
+    @cmd.execute
+
+    refute_path_exists @a_1.gem_dir
+    refute_path_exists @a_1_1.gem_dir
+  end
+
+  def test_execute_all_user_no_sudo
+    FileUtils.chmod 0555, @gemhome
+
+    @a_1_1 = quick_spec 'a', '1.1'
+    @a_1_1 = install_gem_user @a_1_1 # pick up user install path
+
+    Gem::Specification.dirs = [Gem.dir, Gem.user_dir]
+
+    assert_path_exists @a_1.gem_dir
+    assert_path_exists @a_1_1.gem_dir
+
+    @cmd.options[:args] = %w[a]
+
+    @cmd.execute
+
+    assert_path_exists @a_1.gem_dir
+    refute_path_exists @a_1_1.gem_dir
+  ensure
+    FileUtils.chmod 0755, @gemhome
+  end unless win_platform?
 
   def test_execute_dry_run
     @cmd.options[:args] = %w[a]

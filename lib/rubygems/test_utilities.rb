@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'tempfile'
 require 'rubygems'
 require 'rubygems/remote_fetcher'
@@ -145,6 +139,8 @@ end
 ##
 # A StringIO duck-typed class that uses Tempfile instead of String as the
 # backing store.
+#
+# This is available when rubygems/test_utilities is required.
 #--
 # This class was added to flush out problems in Rubinius' IO implementation.
 

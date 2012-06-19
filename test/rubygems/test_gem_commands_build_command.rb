@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/build_command'
 require 'rubygems/format'
@@ -103,6 +97,22 @@ class TestGemCommandsBuildCommand < Gem::TestCase
     assert_equal "some_gem", spec.name
     assert_equal "this is a summary", spec.summary
   end
+
+  def test_execute_force
+    @gem.instance_variable_set :@required_rubygems_version, nil
+
+    gemspec_file = File.join(@tempdir, @gem.spec_name)
+
+    File.open gemspec_file, 'w' do |gs|
+      gs.write @gem.to_yaml
+    end
+
+    @cmd.options[:args] = [gemspec_file]
+    @cmd.options[:force] = true
+
+    util_test_build_gem @gem, gemspec_file
+  end
+
 
 end
 

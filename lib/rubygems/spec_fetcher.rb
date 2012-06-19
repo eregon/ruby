@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/remote_fetcher'
 require 'rubygems/user_interaction'
 require 'rubygems/errors'
@@ -173,7 +167,7 @@ class Gem::SpecFetcher
 
     found.each do |source_uri, specs|
       uri_str = source_uri.to_s
-      specs_and_sources.push(*specs.map { |spec| [spec, uri_str] })
+      specs_and_sources.concat(specs.map { |spec| [spec, uri_str] })
     end
 
     [specs_and_sources, errors]
@@ -261,8 +255,12 @@ class Gem::SpecFetcher
     loaded     = false
 
     if File.exist? local_file then
-      spec_dump =
-        @fetcher.fetch_path(spec_path, File.mtime(local_file)) rescue nil
+      begin
+        spec_dump =
+          @fetcher.fetch_path(spec_path, File.mtime(local_file))
+      rescue Gem::RemoteFetcher::FetchError => e
+        alert_warning "Error fetching data: #{e.message}"
+      end
 
       loaded = true if spec_dump
 

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/dependency'
 
@@ -69,7 +63,7 @@ class TestGemDependency < Gem::TestCase
     assert_match dep("a", ">= 0"),   dep("a", "1"), "match version"
     refute_match dep("a"), Object.new
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       assert_match dep(/a/, ">= 0"),   d,             "match simple regexp"
       assert_match dep(/a|b/, ">= 0"), d,             "match scary regexp"
       refute_match dep(/a/), dep("b")
@@ -78,7 +72,7 @@ class TestGemDependency < Gem::TestCase
 
   def test_equals_tilde_escape
     refute_match dep("a|b"), dep("a", "1")
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       assert_match dep(/a|b/), dep("a", "1")
     end
   end
@@ -94,7 +88,7 @@ class TestGemDependency < Gem::TestCase
   def test_equals_tilde_spec
     assert_match dep("a", ">= 0"),   spec("a", "0")
     assert_match dep("a", "1"),      spec("a", "1")
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       assert_match dep(/a/, ">= 0"),   spec("a", "0")
       assert_match dep(/a|b/, ">= 0"), spec("b", "0")
       refute_match dep(/a/, ">= 0"),   spec("b", "0")

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/server'
 require 'stringio'
@@ -39,7 +33,7 @@ class TestGemServer < Gem::TestCase
     data = StringIO.new "GET /Marshal.#{Gem.marshal_version} HTTP/1.0\r\n\r\n"
     @req.parse data
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       @server.Marshal @req, @res
     end
 
@@ -47,7 +41,7 @@ class TestGemServer < Gem::TestCase
     assert_match %r| \d\d:\d\d:\d\d |, @res['date']
     assert_equal 'application/octet-stream', @res['content-type']
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       si = Gem::SourceIndex.new
       si.add_specs @a1, @a2
 
@@ -59,7 +53,7 @@ class TestGemServer < Gem::TestCase
     data = StringIO.new "GET /Marshal.#{Gem.marshal_version}.Z HTTP/1.0\r\n\r\n"
     @req.parse data
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       @server.Marshal @req, @res
     end
 
@@ -67,7 +61,7 @@ class TestGemServer < Gem::TestCase
     assert_match %r| \d\d:\d\d:\d\d |, @res['date']
     assert_equal 'application/x-deflate', @res['content-type']
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       si = Gem::SourceIndex.new
       si.add_specs @a1, @a2
 
@@ -79,7 +73,7 @@ class TestGemServer < Gem::TestCase
     data = StringIO.new "GET /latest_specs.#{Gem.marshal_version} HTTP/1.0\r\n\r\n"
     @req.parse data
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       @server.latest_specs @req, @res
     end
 
@@ -94,7 +88,7 @@ class TestGemServer < Gem::TestCase
     data = StringIO.new "GET /latest_specs.#{Gem.marshal_version}.gz HTTP/1.0\r\n\r\n"
     @req.parse data
 
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       @server.latest_specs @req, @res
     end
 

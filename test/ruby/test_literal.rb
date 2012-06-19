@@ -1,4 +1,5 @@
 require 'test/unit'
+require_relative 'envutil'
 
 class TestRubyLiteral < Test::Unit::TestCase
 
@@ -27,6 +28,7 @@ class TestRubyLiteral < Test::Unit::TestCase
     assert_equal '123456789012345678901234567890', 123456789012345678901234567890.inspect
     assert_instance_of Bignum, 123456789012345678901234567890
     assert_instance_of Float, 1.3
+    assert_equal '2', eval("0x00+2").inspect
   end
 
   def test_self
@@ -53,15 +55,40 @@ class TestRubyLiteral < Test::Unit::TestCase
     assert_equal "3", "\x33"
     assert_equal "\n", "\n"
     bug2500 = '[ruby-core:27228]'
+    bug5262 = '[ruby-core:39222]'
     %w[c C- M-].each do |pre|
       ["u", %w[u{ }]].each do |open, close|
-        str = "\"\\#{pre}\\#{open}5555#{close}\""
-        assert_raise(SyntaxError, "#{bug2500} eval(#{str})") {eval(str)}
+        ["?", ['"', '"']].each do |qopen, qclose|
+          str = "#{qopen}\\#{pre}\\#{open}5555#{close}#{qclose}"
+          assert_raise(SyntaxError, "#{bug2500} eval(#{str})") {eval(str)}
+
+          str = "#{qopen}\\#{pre}\\#{open}\u201c#{close}#{qclose}"
+          assert_raise(SyntaxError, "#{bug5262} eval(#{str})") {eval(str)}
+
+          str = "#{qopen}\\#{pre}\\#{open}\u201c#{close}#{qclose}".encode("euc-jp")
+          assert_raise(SyntaxError, "#{bug5262} eval(#{str})") {eval(str)}
+
+          str = "#{qopen}\\#{pre}\\#{open}\u201c#{close}#{qclose}".encode("iso-8859-13")
+          assert_raise(SyntaxError, "#{bug5262} eval(#{str})") {eval(str)}
+
+          str = "#{qopen}\\#{pre}\\#{open}\xe2\x7f#{close}#{qclose}".force_encoding("utf-8")
+          assert_raise(SyntaxError, "#{bug5262} eval(#{str})") {eval(str)}
+        end
       end
     end
+    bug6069 = '[ruby-dev:45278]'
     assert_equal "\x13", "\c\x33"
     assert_equal "\x13", "\C-\x33"
     assert_equal "\xB3", "\M-\x33"
+    assert_equal "\u201c", eval(%["\\\u{201c}"]), bug5262
+    assert_equal "\u201c".encode("euc-jp"), eval(%["\\\u{201c}"].encode("euc-jp")), bug5262
+    assert_equal "\u201c".encode("iso-8859-13"), eval(%["\\\u{201c}"].encode("iso-8859-13")), bug5262
+    assert_equal "\\\u201c", eval(%['\\\u{201c}']), bug6069
+    assert_equal "\\\u201c".encode("euc-jp"), eval(%['\\\u{201c}'].encode("euc-jp")), bug6069
+    assert_equal "\\\u201c".encode("iso-8859-13"), eval(%['\\\u{201c}'].encode("iso-8859-13")), bug6069
+    assert_equal "\u201c", eval(%[?\\\u{201c}]), bug6069
+    assert_equal "\u201c".encode("euc-jp"), eval(%[?\\\u{201c}].encode("euc-jp")), bug6069
+    assert_equal "\u201c".encode("iso-8859-13"), eval(%[?\\\u{201c}].encode("iso-8859-13")), bug6069
   end
 
   def test_dstring
@@ -158,6 +185,13 @@ class TestRubyLiteral < Test::Unit::TestCase
     assert_equal 2, h.size
     assert_equal h, h
     assert_equal "literal", h["string"]
+  end
+
+  def test_big_array_and_hash_literal
+    assert_normal_exit %q{GC.disable=true; x = nil; raise if eval("[#{(1..1_000_000).map{'x'}.join(", ")}]").size != 1_000_000}, "", timeout: 300, child_env: %[--disable-gems]
+    assert_normal_exit %q{GC.disable=true; x = nil; raise if eval("[#{(1..1_000_000).to_a.join(", ")}]").size != 1_000_000}, "", timeout: 300, child_env: %[--disable-gems]
+    assert_normal_exit %q{GC.disable=true; x = nil; raise if eval("{#{(1..1_000_000).map{|n| "#{n} => x"}.join(', ')}}").size != 1_000_000}, "", timeout: 300, child_env: %[--disable-gems]
+    assert_normal_exit %q{GC.disable=true; x = nil; raise if eval("{#{(1..1_000_000).map{|n| "#{n} => #{n}"}.join(', ')}}").size != 1_000_000}, "", timeout: 300, child_env: %[--disable-gems]
   end
 
   def test_range

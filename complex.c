@@ -121,7 +121,7 @@ f_mul(VALUE x, VALUE y)
     if (FIXNUM_P(y)) {
 	long iy = FIX2LONG(y);
 	if (iy == 0) {
-	    if (FIXNUM_P(x) || TYPE(x) == T_BIGNUM)
+	    if (FIXNUM_P(x) || RB_TYPE_P(x, T_BIGNUM))
 		return ZERO;
 	}
 	else if (iy == 1)
@@ -130,7 +130,7 @@ f_mul(VALUE x, VALUE y)
     else if (FIXNUM_P(x)) {
 	long ix = FIX2LONG(x);
 	if (ix == 0) {
-	    if (FIXNUM_P(y) || TYPE(y) == T_BIGNUM)
+	    if (FIXNUM_P(y) || RB_TYPE_P(y, T_BIGNUM))
 		return ZERO;
 	}
 	else if (ix == 1)
@@ -166,14 +166,14 @@ fun1(real_p)
 inline static VALUE
 f_to_i(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return rb_str_to_inum(x, 10, 0);
     return rb_funcall(x, id_to_i, 0);
 }
 inline static VALUE
 f_to_f(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return DBL2NUM(rb_str_to_dbl(x, 0));
     return rb_funcall(x, id_to_f, 0);
 }
@@ -486,7 +486,6 @@ nucomp_f_complex(int argc, VALUE *argv, VALUE klass)
 }
 
 #define imp1(n) \
-extern VALUE rb_math_##n(VALUE x);\
 inline static VALUE \
 m_##n##_bang(VALUE x)\
 {\
@@ -494,7 +493,6 @@ m_##n##_bang(VALUE x)\
 }
 
 #define imp2(n) \
-extern VALUE rb_math_##n(VALUE x, VALUE y);\
 inline static VALUE \
 m_##n##_bang(VALUE x, VALUE y)\
 {\
@@ -889,7 +887,7 @@ nucomp_expt(VALUE self, VALUE other)
 		    if (r)
 			break;
 
-		    x = f_complex_new2(CLASS_OF(self),
+		    x = nucomp_s_new_internal(CLASS_OF(self),
 				       f_sub(f_mul(dat->real, dat->real),
 					     f_mul(dat->imag, dat->imag)),
 				       f_mul(f_mul(TWO, dat->real), dat->imag));
@@ -946,7 +944,7 @@ nucomp_coerce(VALUE self, VALUE other)
 {
     if (k_numeric_p(other) && f_real_p(other))
 	return rb_assoc_new(f_complex_new_bang1(CLASS_OF(self), other), self);
-    if (TYPE(other) == T_COMPLEX)
+    if (RB_TYPE_P(other, T_COMPLEX))
 	return rb_assoc_new(other, self);
 
     rb_raise(rb_eTypeError, "%s can't be coerced into %s",
@@ -1175,6 +1173,10 @@ nucomp_eql_p(VALUE self, VALUE other)
 inline static VALUE
 f_signbit(VALUE x)
 {
+#if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun) && \
+    !defined(signbit)
+    extern int signbit(double);
+#endif
     switch (TYPE(x)) {
       case T_FLOAT: {
 	double f = RFLOAT_VALUE(x);
@@ -1257,7 +1259,13 @@ static VALUE
 nucomp_marshal_load(VALUE self, VALUE a)
 {
     get_dat1(self);
+
+    rb_check_frozen(self);
+    rb_check_trusted(self);
+
     Check_Type(a, T_ARRAY);
+    if (RARRAY_LEN(a) != 2)
+	rb_raise(rb_eArgError, "marshaled complex must have an array whose length is 2 but %ld", RARRAY_LEN(a));
     dat->real = RARRAY_PTR(a)[0];
     dat->imag = RARRAY_PTR(a)[1];
     rb_copy_generic_ivar(self, a);
@@ -1337,7 +1345,8 @@ nucomp_to_f(VALUE self)
  * call-seq:
  *    cmp.to_r  ->  rational
  *
- * Returns the value as a rational if possible.
+ * If the imaginary part is exactly 0, returns the real part as a Rational,
+ * otherwise a RangeError is raised.
  */
 static VALUE
 nucomp_to_r(VALUE self)
@@ -1356,14 +1365,22 @@ nucomp_to_r(VALUE self)
  * call-seq:
  *    cmp.rationalize([eps])  ->  rational
  *
- * Returns the value as a rational if possible.  An optional argument
- * eps is always ignored.
+ * If the imaginary part is exactly 0, returns the real part as a Rational,
+ * otherwise a RangeError is raised.
  */
 static VALUE
 nucomp_rationalize(int argc, VALUE *argv, VALUE self)
 {
+    get_dat1(self);
+
     rb_scan_args(argc, argv, "01", NULL);
-    return nucomp_to_r(self);
+
+    if (k_inexact_p(dat->imag) || f_nonzero_p(dat->imag)) {
+       VALUE s = f_to_s(self);
+       rb_raise(rb_eRangeError, "can't convert %s into Rational",
+                StringValuePtr(s));
+    }
+    return rb_funcall2(dat->real, rb_intern("rationalize"), argc, argv);
 }
 
 /*
@@ -1970,6 +1987,9 @@ Init_Complex(void)
     rb_define_method(rb_cFloat, "angle", float_arg, 0);
     rb_define_method(rb_cFloat, "phase", float_arg, 0);
 
+    /*
+     * The imaginary unit.
+     */
     rb_define_const(rb_cComplex, "I",
 		    f_complex_new_bang2(rb_cComplex, ZERO, ONE));
 }

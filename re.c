@@ -769,7 +769,7 @@ onig_new_with_source(regex_t** reg, const UChar* pattern, const UChar* pattern_e
 {
   int r;
 
-  *reg = (regex_t* )xmalloc(sizeof(regex_t));
+  *reg = (regex_t* )malloc(sizeof(regex_t));
   if (IS_NULL(*reg)) return ONIGERR_MEMORY;
 
   r = onig_reg_init(*reg, option, ONIGENC_CASE_FOLD_DEFAULT, enc, syntax);
@@ -939,11 +939,8 @@ match_init_copy(VALUE obj, VALUE orig)
 {
     struct rmatch *rm;
 
-    if (obj == orig) return obj;
+    if (!OBJ_INIT_COPY(obj, orig)) return obj;
 
-    if (!rb_obj_is_instance_of(orig, rb_obj_class(obj))) {
-	rb_raise(rb_eTypeError, "wrong argument class");
-    }
     RMATCH(obj)->str = RMATCH(orig)->str;
     RMATCH(obj)->regexp = RMATCH(orig)->regexp;
 
@@ -1665,6 +1662,8 @@ name_to_backref_number(struct re_registers *regs, VALUE regexp, const char* name
 	rb_raise(rb_eIndexError, "undefined group name reference: %s",
 				 StringValuePtr(s));
     }
+
+    UNREACHABLE;
 }
 
 /*
@@ -1674,11 +1673,12 @@ name_to_backref_number(struct re_registers *regs, VALUE regexp, const char* name
  *     mtch[range]           -> array
  *     mtch[name]            -> str or nil
  *
- *  Match Reference---<code>MatchData</code> acts as an array, and may be
- *  accessed using the normal array indexing techniques.  <i>mtch</i>[0] is
- *  equivalent to the special variable <code>$&</code>, and returns the entire
- *  matched string.  <i>mtch</i>[1], <i>mtch</i>[2], and so on return the values
- *  of the matched backreferences (portions of the pattern between parentheses).
+ *  Match Reference -- <code>MatchData</code> acts as an array, and may be
+ *  accessed using the normal array indexing techniques.  <code>mtch[0]</code>
+ *  is equivalent to the special variable <code>$&</code>, and returns the
+ *  entire matched string.  <code>mtch[1]</code>, <code>mtch[2]</code>, and so
+ *  on return the values of the matched backreferences (portions of the
+ *  pattern between parentheses).
  *
  *     m = /(.)(.)(\d+)(\d)/.match("THX1138.")
  *     m          #=> #<MatchData "HX1138" 1:"H" 2:"X" 3:"113" 4:"8">
@@ -2386,8 +2386,8 @@ rb_reg_initialize(VALUE obj, const char *s, long len, rb_encoding *enc,
     re->ptr = 0;
 
     if (rb_enc_dummy_p(enc)) {
-	    errcpy(err, "can't make regexp with dummy encoding");
-	    return -1;
+	errcpy(err, "can't make regexp with dummy encoding");
+	return -1;
     }
 
     unescaped = rb_reg_preprocess(s, s+len, enc, &fixed_enc, err);
@@ -2579,7 +2579,7 @@ reg_hash(VALUE re)
  *
  *     /abc/  == /abc/x   #=> false
  *     /abc/  == /abc/i   #=> false
- *     /abc/  == /abc/n   #=> false
+ *     /abc/  == /abc/u   #=> false
  *     /abc/u == /abc/n   #=> false
  */
 
@@ -2587,7 +2587,7 @@ static VALUE
 rb_reg_equal(VALUE re1, VALUE re2)
 {
     if (re1 == re2) return Qtrue;
-    if (TYPE(re2) != T_REGEXP) return Qfalse;
+    if (!RB_TYPE_P(re2, T_REGEXP)) return Qfalse;
     rb_reg_check(re1); rb_reg_check(re2);
     if (FL_TEST(re1, KCODE_FIXED) != FL_TEST(re2, KCODE_FIXED)) return Qfalse;
     if (RREGEXP(re1)->ptr->options != RREGEXP(re2)->ptr->options) return Qfalse;
@@ -2635,7 +2635,7 @@ match_equal(VALUE match1, VALUE match2)
 {
     const struct re_registers *regs1, *regs2;
     if (match1 == match2) return Qtrue;
-    if (TYPE(match2) != T_MATCH) return Qfalse;
+    if (!RB_TYPE_P(match2, T_MATCH)) return Qfalse;
     if (!rb_str_equal(RMATCH(match1)->str, RMATCH(match2)->str)) return Qfalse;
     if (!rb_reg_equal(RMATCH(match1)->regexp, RMATCH(match2)->regexp)) return Qfalse;
     regs1 = RMATCH_REGS(match1);
@@ -2795,7 +2795,7 @@ rb_reg_match2(VALUE re)
     long start;
     VALUE line = rb_lastline_get();
 
-    if (TYPE(line) != T_STRING) {
+    if (!RB_TYPE_P(line, T_STRING)) {
 	rb_backref_set(Qnil);
 	return Qnil;
     }
@@ -2903,10 +2903,8 @@ rb_reg_initialize_m(int argc, VALUE *argv, VALUE self)
     const char *ptr;
     long len;
 
-    if (argc == 0 || argc > 3) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..3)", argc);
-    }
-    if (TYPE(argv[0]) == T_REGEXP) {
+    rb_check_arity(argc, 1, 3);
+    if (RB_TYPE_P(argv[0], T_REGEXP)) {
 	VALUE re = argv[0];
 
 	if (argc > 1) {
@@ -3259,12 +3257,7 @@ rb_reg_init_copy(VALUE copy, VALUE re)
     const char *s;
     long len;
 
-    if (copy == re) return copy;
-    rb_check_frozen(copy);
-    /* need better argument type check */
-    if (!rb_obj_is_instance_of(re, rb_obj_class(copy))) {
-	rb_raise(rb_eTypeError, "wrong argument type");
-    }
+    if (!OBJ_INIT_COPY(copy, re)) return copy;
     rb_reg_check(re);
     s = RREGEXP_SRC_PTR(re);
     len = RREGEXP_SRC_LEN(re);

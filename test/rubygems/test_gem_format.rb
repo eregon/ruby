@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/package/tar_test_case'
 require 'rubygems/simple_gem'
 require 'rubygems/format'
@@ -63,7 +57,7 @@ class TestGemFormat < Gem::Package::TarTestCase
 
   def test_class_from_file_by_path_nonexistent
     assert_raises Gem::Exception do
-      Gem::Format.from_file_by_path '/nonexistent'
+      Gem::Format.from_file_by_path '/a/path/that/is/nonexistent'
     end
   end
 

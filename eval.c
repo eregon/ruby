@@ -31,16 +31,18 @@ VALUE rb_eSysStackError;
 #include "eval_error.c"
 #include "eval_jump.c"
 
-/* initialize ruby */
-
-void
-ruby_init(void)
+/* Initializes the Ruby VM and builtin libraries.
+ * @retval 0 if succeeded.
+ * @retval non-zero an error occured.
+ */
+int
+ruby_setup(void)
 {
     static int initialized = 0;
     int state;
 
     if (initialized)
-	return;
+	return 0;
     initialized = 1;
 
     ruby_init_stack((void *)&state);
@@ -51,17 +53,38 @@ ruby_init(void)
     if ((state = EXEC_TAG()) == 0) {
 	rb_call_inits();
 	ruby_prog_init();
+	GET_VM()->running = 1;
     }
     POP_TAG();
 
+    return state;
+}
+
+/* Calls ruby_setup() and check error.
+ *
+ * Prints errors and calls exit(3) if an error occured.
+ */
+void
+ruby_init(void)
+{
+    int state = ruby_setup();
     if (state) {
 	error_print();
 	exit(EXIT_FAILURE);
     }
-    GET_VM()->running = 1;
 }
 
-void *
+/*! Processes command line arguments and compiles the Ruby source to execute.
+ *
+ * This function does:
+ * \li  Processses the given command line flags and arguments for ruby(1)
+ * \li compiles the source code from the given argument, -e or stdin, and
+ * \li returns the compiled source as an opaque pointer to an internal data structure
+ *
+ * @return an opaque pointer to the compiled source or an internal special value.
+ * @sa ruby_executable_node().
+ */
+ruby_opaque_t
 ruby_options(int argc, char **argv)
 {
     int state;
@@ -101,6 +124,13 @@ ruby_finalize_1(void)
     rb_gc_call_finalizer_at_exit();
 }
 
+/** Runs the VM finalization processes.
+ *
+ * <code>END{}</code> and procs registered by <code>Kernel.#at_ext</code> are
+ * executed here. See the Ruby language spec for more details.
+ *
+ * @note This function is allowed to raise an exception if an error occurred.
+ */
 void
 ruby_finalize(void)
 {
@@ -108,6 +138,16 @@ ruby_finalize(void)
     ruby_finalize_1();
 }
 
+/** Destructs the VM.
+ *
+ * Runs the VM finalization processes as well as ruby_finalize(), and frees
+ * resources used by the VM.
+ *
+ * @param ex Default value to the return value.
+ * @return If an error occured returns a non-zero. If otherwise, reurns the
+ *         given ex.
+ * @note This function does not raise any exception.
+ */
 int
 ruby_cleanup(volatile int ex)
 {
@@ -145,6 +185,9 @@ ruby_cleanup(volatile int ex)
     th->errinfo = errs[1];
     ex = error_handle(ex);
     ruby_finalize_1();
+
+    /* unlock again if finalizer took mutexes. */
+    rb_threadptr_unlock_all_locking_mutexes(GET_THREAD());
     POP_TAG();
     rb_thread_stop_timer_thread(1);
 
@@ -166,7 +209,7 @@ ruby_cleanup(volatile int ex)
 	if (!RTEST(err)) continue;
 
 	/* th->errinfo contains a NODE while break'ing */
-	if (TYPE(err) == T_NODE) continue;
+	if (RB_TYPE_P(err, T_NODE)) continue;
 
 	if (rb_obj_is_kind_of(err, rb_eSystemExit)) {
 	    ex = sysexit_status(err);
@@ -187,34 +230,27 @@ ruby_cleanup(volatile int ex)
     return ex;
 }
 
-static int
-ruby_exec_internal(void *n)
-{
-    volatile int state;
-    VALUE iseq = (VALUE)n;
-    rb_thread_t *th = GET_THREAD();
-
-    if (!n) return 0;
-
-    PUSH_TAG();
-    if ((state = EXEC_TAG()) == 0) {
-	SAVE_ROOT_JMPBUF(th, {
-	    th->base_block = 0;
-	    rb_iseq_eval_main(iseq);
-	});
-    }
-    POP_TAG();
-    return state;
-}
-
+/*! Calls ruby_cleanup() and exits the process */
 void
 ruby_stop(int ex)
 {
     exit(ruby_cleanup(ex));
 }
 
+/*! Checks the return value of ruby_options().
+ * @param n return value of ruby_options().
+ * @param status pointer to the exit status of this process.
+ *
+ * ruby_options() sometimes returns a special value to indicate this process
+ * should immediately exit. This function checks if the case. Also stores the
+ * exit status that the caller have to pass to exit(3) into
+ * <code>*status</code>.
+ *
+ * @retval non-zero if the given opaque pointer is actually a compiled source.
+ * @retval 0 if the given value is such a special value.
+ */
 int
-ruby_executable_node(void *n, int *status)
+ruby_executable_node(ruby_opaque_t n, int *status)
 {
     VALUE v = (VALUE)n;
     int s;
@@ -230,8 +266,36 @@ ruby_executable_node(void *n, int *status)
     return FALSE;
 }
 
+static int
+ruby_eval_main_internal(VALUE iseqval, VALUE* result)
+{
+    volatile int state;
+    volatile VALUE retval;
+    rb_thread_t *th = GET_THREAD();
+
+    if (!iseqval) {
+	*result = Qnil;
+	return 0;
+    }
+
+    PUSH_TAG();
+    if ((state = EXEC_TAG()) == 0) {
+	SAVE_ROOT_JMPBUF(th, {
+	    th->base_block = 0;
+	    retval = rb_iseq_eval_main(iseqval);
+	});
+    }
+    POP_TAG();
+    *result = state ? th->errinfo : retval;
+    return state;
+}
+
+/*! Runs the given compiled source and exits this process.
+ * @retval 0 if successfully run thhe source
+ * @retval non-zero if an error occurred.
+*/
 int
-ruby_run_node(void *n)
+ruby_run_node(ruby_opaque_t n)
 {
     int status;
     if (!ruby_executable_node(n, &status)) {
@@ -241,11 +305,29 @@ ruby_run_node(void *n)
     return ruby_cleanup(ruby_exec_node(n));
 }
 
+/*! Runs the given compiled source */
 int
-ruby_exec_node(void *n)
+ruby_exec_node(ruby_opaque_t n)
 {
+    VALUE dummy;
     ruby_init_stack((void *)&n);
-    return ruby_exec_internal(n);
+    return ruby_eval_main_internal((VALUE)n, &dummy);
+}
+
+
+/*!
+ * Evaluates the given iseq in the main (toplevel) context.
+ *
+ * @param iseqval a VALUE that wraps an iseq.
+ * @param result Stores the evaluated value if succeeded,
+ *        or an exception if failed.
+ * @retval 0 if succeeded
+ * @retval non-zero if failed.
+ */
+int
+ruby_eval_main(ruby_opaque_t n, VALUE *result)
+{
+    return !!ruby_eval_main_internal((VALUE)n, result);
 }
 
 /*
@@ -283,15 +365,23 @@ rb_mod_nesting(void)
 /*
  *  call-seq:
  *     Module.constants   -> array
+ *     Module.constants(inherited)   -> array
  *
- *  Returns an array of the names of all constants defined in the
- *  system. This list includes the names of all modules and classes.
+ *  In the first form, returns an array of the names of all
+ *  constants accessible from the point of call.
+ *  This list includes the names of all modules and classes
+ *  defined in the global scope.
  *
- *     p Module.constants.sort[1..5]
+ *     Module.constants.first(4)
+ *        # => [:ARGF, :ARGV, :ArgumentError, :Array]
  *
- *  <em>produces:</em>
+ *     Module.constants.include?(:SEEK_SET)   # => false
  *
- *     ["ARGV", "ArgumentError", "Array", "Bignum", "Binding"]
+ *     class IO
+ *       Module.constants.include?(:SEEK_SET) # => true
+ *     end
+ *
+ *  The second form calls the instance method +constants+.
  */
 
 static VALUE
@@ -376,7 +466,7 @@ setup_exception(rb_thread_t *th, int tag, volatile VALUE mesg)
 	else {
 	    at = get_backtrace(mesg);
 	    if (NIL_P(at)) {
-		at = rb_make_backtrace();
+		at = rb_vm_backtrace_object();
 		if (OBJ_FROZEN(mesg)) {
 		    mesg = rb_obj_dup(mesg);
 		}
@@ -426,8 +516,6 @@ setup_exception(rb_thread_t *th, int tag, volatile VALUE mesg)
 	rb_threadptr_reset_raised(th);
 	JUMP_TAG(TAG_FATAL);
     }
-
-    rb_trap_restore_mask();
 
     if (tag != TAG_FATAL) {
 	EXEC_EVENT_HOOK(th, RUBY_EVENT_RAISE, th->cfp->self, 0, 0);
@@ -507,7 +595,8 @@ rb_f_raise(int argc, VALUE *argv)
 	}
     }
     rb_raise_jump(rb_make_exception(argc, argv));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -546,7 +635,7 @@ make_exception(int argc, VALUE *argv, int isstr)
 	}
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..3)", argc);
+	rb_check_arity(argc, 0, 3);
 	break;
     }
     if (argc > 0) {
@@ -594,8 +683,7 @@ rb_block_given_p(void)
 {
     rb_thread_t *th = GET_THREAD();
 
-    if ((th->cfp->lfp[0] & 0x02) == 0 &&
-	GC_GUARDED_PTR_REF(th->cfp->lfp[0])) {
+    if (rb_vm_control_frame_block_ptr(th->cfp)) {
 	return TRUE;
     }
     else {
@@ -880,10 +968,7 @@ rb_mod_mix_into(int argc, VALUE *argv, VALUE klass)
     st_table *const_tbl = 0, *method_tbl = 0;
     int i = 0;
 
-    if (argc < 1 || argc > 3) {
-      wrong_args:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1)", argc);
-    }
+    rb_check_arity(argc, 1, 3);
     module = argv[i++];
 
     switch (TYPE(module)) {
@@ -913,7 +998,7 @@ rb_mod_mix_into(int argc, VALUE *argv, VALUE klass)
 	}
 	methods = tmp;
     }
-    if (i < argc) goto wrong_args;
+    if (i < argc) rb_raise(rb_eArgError, "wrong arguments");
     if (!NIL_P(constants)) {
 	VALUE hash = rb_hash_new();
 	for (i = 0; i < RARRAY_LEN(constants); ++i) {
@@ -1006,9 +1091,7 @@ rb_obj_extend(int argc, VALUE *argv, VALUE obj)
 {
     int i;
 
-    if (argc == 0) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i = 0; i < argc; i++)
 	Check_Type(argv[i], T_MODULE);
     while (argc--) {
@@ -1050,12 +1133,12 @@ errinfo_place(rb_thread_t *th)
     while (RUBY_VM_VALID_CONTROL_FRAME_P(cfp, end_cfp)) {
 	if (RUBY_VM_NORMAL_ISEQ_P(cfp->iseq)) {
 	    if (cfp->iseq->type == ISEQ_TYPE_RESCUE) {
-		return &cfp->dfp[-2];
+		return &cfp->ep[-2];
 	    }
 	    else if (cfp->iseq->type == ISEQ_TYPE_ENSURE &&
-		     TYPE(cfp->dfp[-2]) != T_NODE &&
-		     !FIXNUM_P(cfp->dfp[-2])) {
-		return &cfp->dfp[-2];
+		     !RB_TYPE_P(cfp->ep[-2], T_NODE) &&
+		     !FIXNUM_P(cfp->ep[-2])) {
+		return &cfp->ep[-2];
 	    }
 	}
 	cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);

@@ -81,19 +81,66 @@ ossl_dh_new(EVP_PKEY *pkey)
 /*
  * Private
  */
+#if defined(HAVE_DH_GENERATE_PARAMETERS_EX) && HAVE_BN_GENCB
+struct dh_blocking_gen_arg {
+    DH *dh;
+    int size;
+    int gen;
+    BN_GENCB *cb;
+    int result;
+};
+
+static VALUE
+dh_blocking_gen(void *arg)
+{
+    struct dh_blocking_gen_arg *gen = (struct dh_blocking_gen_arg *)arg;
+    gen->result = DH_generate_parameters_ex(gen->dh, gen->size, gen->gen, gen->cb);
+    return Qnil;
+}
+#endif
+
 static DH *
 dh_generate(int size, int gen)
 {
-    DH *dh;
+#if defined(HAVE_DH_GENERATE_PARAMETERS_EX) && HAVE_BN_GENCB
+    BN_GENCB cb;
+    struct ossl_generate_cb_arg cb_arg;
+    struct dh_blocking_gen_arg gen_arg;
+    DH *dh = DH_new();
 
-    dh = DH_generate_parameters(size, gen,
-	    rb_block_given_p() ? ossl_generate_cb : NULL,
-	    NULL);
     if (!dh) return 0;
 
-    if (!DH_generate_key(dh)) {
+    memset(&cb_arg, 0, sizeof(struct ossl_generate_cb_arg));
+    if (rb_block_given_p())
+	cb_arg.yield = 1;
+    BN_GENCB_set(&cb, ossl_generate_cb_2, &cb_arg);
+    gen_arg.dh = dh;
+    gen_arg.size = size;
+    gen_arg.gen = gen;
+    gen_arg.cb = &cb;
+    if (cb_arg.yield == 1) {
+	/* we cannot release GVL when callback proc is supplied */
+	dh_blocking_gen(&gen_arg);
+    } else {
+	/* there's a chance to unblock */
+	rb_thread_blocking_region(dh_blocking_gen, &gen_arg, ossl_generate_cb_stop, &cb_arg);
+    }
+
+    if (!gen_arg.result) {
 	DH_free(dh);
+	if (cb_arg.state) rb_jump_tag(cb_arg.state);
 	return 0;
+    }
+#else
+    DH *dh;
+
+    dh = DH_generate_parameters(size, gen, rb_block_given_p() ? ossl_generate_cb : NULL, NULL);
+    if (!dh) return 0;
+#endif
+
+    if (!DH_generate_key(dh)) {
+        DH_free(dh);
+        return 0;
     }
 
     return dh;
@@ -357,7 +404,7 @@ ossl_dh_to_text(VALUE self)
  * per-session information.
  *
  * === Example
- *  dh = OpenSSL::PKey::DH.new(2048) # has public and private key set 
+ *  dh = OpenSSL::PKey::DH.new(2048) # has public and private key set
  *  public_key = dh.public_key # contains only prime and generator
  *  parameters = public_key.to_der # it's safe to publish this
  */
@@ -574,10 +621,10 @@ Init_ossl_dh()
      *  dh1 = OpenSSL::PKey::DH.new(2048)
      *  params = dh1.public_key.to_der #you may send this publicly to the participating party
      *  dh2 = OpenSSL::PKey::DH.new(der)
-     *  dh2.generate_key! #generate the per-session key pair 
+     *  dh2.generate_key! #generate the per-session key pair
      *  symm_key1 = dh1.compute_key(dh2.pub_key)
      *  symm_key2 = dh2.compute_key(dh1.pub_key)
-     *  
+     *
      *  puts symm_key1 == symm_key2 # => true
      */
     cDH = rb_define_class_under(mPKey, "DH", cPKey);

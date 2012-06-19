@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/local_remote_options'
 require 'rubygems/spec_fetcher'
@@ -85,7 +79,7 @@ class Gem::Commands::QueryCommand < Gem::Command
 
     req = Gem::Requirement.default
     # TODO: deprecate for real
-    dep = Deprecate.skip_during { Gem::Dependency.new name, req }
+    dep = Gem::Deprecate.skip_during { Gem::Dependency.new name, req }
 
     if local? then
       if prerelease and not both? then

@@ -22,6 +22,13 @@ class OpenSSL::TestPKeyDSA < Test::Unit::TestCase
     assert_equal([], OpenSSL.errors)
   end
 
+  def test_new_break
+    assert_nil(OpenSSL::PKey::DSA.new(512) { break })
+    assert_raise(RuntimeError) do
+      OpenSSL::PKey::DSA.new(512) { raise }
+    end
+  end
+
   def test_sys_sign_verify
     key = OpenSSL::TestUtils::TEST_KEY_DSA256
     data = 'Sign me!'
@@ -209,6 +216,15 @@ YNMbNw==
     assert(key2.private?)
     #omit pem equality check, will be different due to cipher iv
     assert_equal([], OpenSSL.errors)
+  end
+
+  def test_export_password_length
+    key = OpenSSL::TestUtils::TEST_KEY_DSA256
+    assert_raise(OpenSSL::OpenSSLError) do
+      key.export(OpenSSL::Cipher.new('AES-128-CBC'), 'sec')
+    end
+    pem = key.export(OpenSSL::Cipher.new('AES-128-CBC'), 'secr')
+    assert(pem)
   end
 
   private

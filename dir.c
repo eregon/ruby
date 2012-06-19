@@ -30,12 +30,7 @@
 # define NAMLEN(dirent) strlen((dirent)->d_name)
 #else
 # define dirent direct
-# if !defined __NeXT__
-#  define NAMLEN(dirent) (dirent)->d_namlen
-# else
-#  /* On some versions of NextStep, d_namlen is always zero, so avoid it. */
-#  define NAMLEN(dirent) strlen((dirent)->d_name)
-# endif
+# define NAMLEN(dirent) (dirent)->d_namlen
 # if HAVE_SYS_NDIR_H
 #  include <sys/ndir.h>
 # endif
@@ -48,6 +43,10 @@
 # ifdef _WIN32
 #  include "win32/dir.h"
 # endif
+#endif
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/dirent.h"
+# include "nacl/stat.h"
 #endif
 
 #include <errno.h>
@@ -79,6 +78,8 @@ char *strchr(char*,char);
 #undef opendir
 #define opendir(p) rb_w32_uopendir(p)
 #endif
+
+#define rb_sys_fail_path(path) rb_sys_fail_str(path)
 
 #define FNM_NOESCAPE	0x01
 #define FNM_PATHNAME	0x02
@@ -387,7 +388,7 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 {
     struct dir_data *dp;
     rb_encoding  *fsenc;
-    VALUE dirname, opt;
+    VALUE dirname, opt, orig;
     static VALUE sym_enc;
 
     if (!sym_enc) {
@@ -405,7 +406,9 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
     }
 
     GlobPathValue(dirname, FALSE);
+    orig = rb_str_dup_frozen(dirname);
     dirname = rb_str_encode_ospath(dirname);
+    dirname = rb_str_dup_frozen(dirname);
 
     TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dp);
     if (dp->dir) closedir(dp->dir);
@@ -419,10 +422,10 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 	    dp->dir = opendir(RSTRING_PTR(dirname));
 	}
 	if (dp->dir == NULL) {
-	    rb_sys_fail(RSTRING_PTR(dirname));
+	    rb_sys_fail_path(orig);
 	}
     }
-    dp->path = rb_str_dup_frozen(dirname);
+    dp->path = orig;
 
     return dir;
 }
@@ -486,8 +489,12 @@ dir_inspect(VALUE dir)
 
     TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
     if (!NIL_P(dirp->path)) {
-	const char *c = rb_obj_classname(dir);
-	return rb_sprintf("#<%s:%s>", c, RSTRING_PTR(dirp->path));
+	VALUE str = rb_str_new_cstr("#<");
+	rb_str_append(str, rb_class_name(CLASS_OF(dir)));
+	rb_str_cat2(str, ":");
+	rb_str_append(str, dirp->path);
+	rb_str_cat2(str, ">");
+	return str;
     }
     return rb_funcall(dir, rb_intern("to_s"), 0, 0);
 }
@@ -581,13 +588,10 @@ dir_read(VALUE dir)
     if (READDIR(dirp->dir, dirp->enc, &STRUCT_DIRENT(entry), dp)) {
 	return rb_external_str_new_with_enc(dp->d_name, NAMLEN(dp), dirp->enc);
     }
-    else if (errno == 0) {	/* end of stream */
-	return Qnil;
-    }
     else {
-	rb_sys_fail(0);
+	if (errno != 0) rb_sys_fail(0);
+	return Qnil;		/* end of stream */
     }
-    return Qnil;		/* not reached */
 }
 
 /*
@@ -754,9 +758,8 @@ dir_close(VALUE dir)
 static void
 dir_chdir(VALUE path)
 {
-    path = rb_str_encode_ospath(path);
     if (chdir(RSTRING_PTR(path)) < 0)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 }
 
 static int chdir_blocking = 0;
@@ -837,6 +840,7 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
     rb_secure(2);
     if (rb_scan_args(argc, argv, "01", &path) == 1) {
 	FilePathValue(path);
+	path = rb_str_encode_ospath(path);
     }
     else {
 	const char *dist = getenv("HOME");
@@ -854,9 +858,8 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
 
     if (rb_block_given_p()) {
 	struct chdir_data args;
-	char *cwd = my_getcwd();
 
-	args.old_path = rb_tainted_str_new2(cwd); xfree(cwd);
+	args.old_path = rb_str_encode_ospath(rb_dir_getwd());
 	args.new_path = path;
 	args.done = FALSE;
 	return rb_ensure(chdir_yield, (VALUE)&args, chdir_restore, (VALUE)&args);
@@ -901,14 +904,21 @@ dir_s_getwd(VALUE dir)
 static void
 check_dirname(volatile VALUE *dir)
 {
+    VALUE d = *dir;
     char *path, *pend;
+    long len;
+    rb_encoding *enc;
 
     rb_secure(2);
-    FilePathValue(*dir);
-    path = RSTRING_PTR(*dir);
-    if (path && *(pend = rb_path_end(rb_path_skip_prefix(path)))) {
-	*dir = rb_str_new(path, pend - path);
+    FilePathValue(d);
+    enc = rb_enc_get(d);
+    RSTRING_GETMEM(d, path, len);
+    pend = path + len;
+    pend = rb_enc_path_end(rb_enc_path_skip_prefix(path, pend, enc), pend, enc);
+    if (pend - path < len) {
+	d = rb_str_subseq(d, 0, pend - path);
     }
+    *dir = rb_str_encode_ospath(d);
 }
 
 #if defined(HAVE_CHROOT)
@@ -925,10 +935,8 @@ static VALUE
 dir_s_chroot(VALUE dir, VALUE path)
 {
     check_dirname(&path);
-
-    path = rb_str_encode_ospath(path);
     if (chroot(RSTRING_PTR(path)) == -1)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 
     return INT2FIX(0);
 }
@@ -965,9 +973,8 @@ dir_s_mkdir(int argc, VALUE *argv, VALUE obj)
     }
 
     check_dirname(&path);
-    path = rb_str_encode_ospath(path);
     if (mkdir(RSTRING_PTR(path), mode) == -1)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 
     return INT2FIX(0);
 }
@@ -985,9 +992,8 @@ static VALUE
 dir_s_rmdir(VALUE obj, VALUE dir)
 {
     check_dirname(&dir);
-    dir = rb_str_encode_ospath(dir);
     if (rmdir(RSTRING_PTR(dir)) < 0)
-	rb_sys_fail(RSTRING_PTR(dir));
+	rb_sys_fail_path(dir);
 
     return INT2FIX(0);
 }
@@ -1489,7 +1495,7 @@ ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg, rb_enco
     start = root = path;
     flags |= FNM_SYSCASE;
 #if defined DOSISH
-    root = rb_path_skip_prefix(root);
+    root = rb_enc_path_skip_prefix(root, root + strlen(root), enc);
 #endif
 
     if (root && *root == '/') root++;
@@ -1779,7 +1785,7 @@ dir_s_aref(int argc, VALUE *argv, VALUE obj)
  *                          More than two literals may be specified.
  *                          Equivalent to pattern alternation in
  *                          regexp.
- *  <code>\</code>::        Escapes the next metacharacter.
+ *  <code> \ </code>::      Escapes the next metacharacter.
  *                          Note that this means you cannot use backslash in windows
  *                          as part of a glob, i.e. Dir["c:\\foo*"] will not work
  *                          use Dir["c:/foo*"] instead
@@ -1837,9 +1843,8 @@ static VALUE
 dir_open_dir(int argc, VALUE *argv)
 {
     VALUE dir = rb_funcall2(rb_cDir, rb_intern("open"), argc, argv);
-    struct dir_data *dirp;
 
-    TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
+    rb_check_typeddata(dir, &dir_data_type);
     return dir;
 }
 
@@ -1911,7 +1916,7 @@ dir_entries(int argc, VALUE *argv, VALUE io)
  *                          match all files beginning with
  *                          <code>c</code>; <code>*c</code> will match
  *                          all files ending with <code>c</code>; and
- *                          <code>*c*</code> will match all files that
+ *                          <code>\*c*</code> will match all files that
  *                          have <code>c</code> in them (including at
  *                          the beginning or end). Equivalent to
  *                          <code>/ .* /x</code> in regexp.
@@ -1923,7 +1928,7 @@ dir_entries(int argc, VALUE *argv, VALUE io)
  *                          Behaves exactly like character sets in
  *                          Regexp, including set negation
  *                          (<code>[^a-z]</code>).
- *  <code>\</code>::        Escapes the next metacharacter.
+ *  <code> \ </code>::      Escapes the next metacharacter.
  *
  *  <i>flags</i> is a bitwise OR of the <code>FNM_xxx</code>
  *  parameters. The same glob pattern and flags are used by
@@ -2020,6 +2025,22 @@ dir_s_home(int argc, VALUE *argv, VALUE obj)
     return rb_home_dir(u, rb_str_new(0, 0));
 }
 
+#if 0
+/*
+ * call-seq:
+ *   Dir.exist?(file_name)   ->  true or false
+ *   Dir.exists?(file_name)   ->  true or false
+ *
+ * Returns <code>true</code> if the named file is a directory,
+ * <code>false</code> otherwise.
+ *
+ */
+VALUE
+rb_file_directory_p()
+{
+}
+#endif
+
 /*
  *  Objects of class <code>Dir</code> are directory streams representing
  *  directories in the underlying file system. They provide a variety of
@@ -2068,8 +2089,8 @@ Init_Dir(void)
 
     rb_define_singleton_method(rb_cDir,"glob", dir_s_glob, -1);
     rb_define_singleton_method(rb_cDir,"[]", dir_s_aref, -1);
-    rb_define_singleton_method(rb_cDir,"exist?", rb_file_directory_p, 1); /* in file.c */
-    rb_define_singleton_method(rb_cDir,"exists?", rb_file_directory_p, 1); /* in file.c */
+    rb_define_singleton_method(rb_cDir,"exist?", rb_file_directory_p, 1);
+    rb_define_singleton_method(rb_cDir,"exists?", rb_file_directory_p, 1);
 
     rb_define_singleton_method(rb_cFile,"fnmatch", file_s_fnmatch, -1);
     rb_define_singleton_method(rb_cFile,"fnmatch?", file_s_fnmatch, -1);

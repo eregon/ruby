@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems/deprecate"
 
 ##
@@ -74,6 +68,7 @@ class Gem::Platform
                       when /aix(\d+)/ then             [ 'aix',       $1  ]
                       when /cygwin/ then               [ 'cygwin',    nil ]
                       when /darwin(\d+)?/ then         [ 'darwin',    $1  ]
+                      when /^macruby$/ then            [ 'macruby',   nil ]
                       when /freebsd(\d+)/ then         [ 'freebsd',   $1  ]
                       when /hpux(\d+)/ then            [ 'hpux',      $1  ]
                       when /^java$/, /^jruby$/ then    [ 'java',      nil ]
@@ -192,7 +187,7 @@ class Gem::Platform
 
   CURRENT = 'current'
 
-  extend Deprecate
+  extend Gem::Deprecate
 
   deprecate :empty?, :none, 2011, 11
 end

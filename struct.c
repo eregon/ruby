@@ -43,7 +43,7 @@ rb_struct_s_members(VALUE klass)
     if (NIL_P(members)) {
 	rb_raise(rb_eTypeError, "uninitialized struct");
     }
-    if (TYPE(members) != T_ARRAY) {
+    if (!RB_TYPE_P(members, T_ARRAY)) {
 	rb_raise(rb_eTypeError, "corrupted struct");
     }
     return members;
@@ -64,25 +64,16 @@ rb_struct_members(VALUE s)
 static VALUE
 rb_struct_s_members_m(VALUE klass)
 {
-    VALUE members, ary;
-    VALUE *p, *pend;
+    VALUE members = rb_struct_s_members(klass);
 
-    members = rb_struct_s_members(klass);
-    ary = rb_ary_new2(RARRAY_LEN(members));
-    p = RARRAY_PTR(members); pend = p + RARRAY_LEN(members);
-    while (p < pend) {
-	rb_ary_push(ary, *p);
-	p++;
-    }
-
-    return ary;
+    return rb_ary_dup(members);
 }
 
 /*
  *  call-seq:
  *     struct.members    -> array
  *
- *  Returns an array of strings representing the names of the instance
+ *  Returns an array of symbols representing the names of the instance
  *  variables.
  *
  *     Customer = Struct.new(:name, :address, :zip)
@@ -113,7 +104,8 @@ rb_struct_getmember(VALUE obj, ID id)
 	}
     }
     rb_name_error(id, "%s is not struct member", rb_id2name(id));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -153,8 +145,7 @@ static void
 rb_struct_modify(VALUE s)
 {
     rb_check_frozen(s);
-    if (!OBJ_UNTRUSTED(s) && rb_safe_level() >= 4)
-       rb_raise(rb_eSecurityError, "Insecure: can't modify Struct");
+    rb_check_trusted(s);
 }
 
 static VALUE
@@ -176,7 +167,8 @@ rb_struct_set(VALUE obj, VALUE val)
     }
     rb_name_error(rb_frame_this_func(), "`%s' is not a struct member",
 		  rb_id2name(rb_frame_this_func()));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -355,7 +347,7 @@ num_members(VALUE klass)
 {
     VALUE members;
     members = struct_ivar_get(klass, id_members);
-    if (TYPE(members) != T_ARRAY) {
+    if (!RB_TYPE_P(members, T_ARRAY)) {
 	rb_raise(rb_eTypeError, "broken members");
     }
     return RARRAY_LEN(members);
@@ -585,15 +577,36 @@ rb_struct_to_a(VALUE s)
     return rb_ary_new4(RSTRUCT_LEN(s), RSTRUCT_PTR(s));
 }
 
+/*
+ *  call-seq:
+ *     struct.to_h     -> hash
+ *
+ *  Returns the values for this instance as a hash with keys
+ *  corresponding to the instance variable name.
+ *
+ *     Customer = Struct.new(:name, :address, :zip)
+ *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
+ *     joe.to_h[:address]   #=> "123 Maple, Anytown NC"
+ */
+
+static VALUE
+rb_struct_to_h(VALUE s)
+{
+    VALUE h = rb_hash_new();
+    VALUE members = rb_struct_members(s);
+    long i;
+
+    for (i=0; i<RSTRUCT_LEN(s); i++) {
+	rb_hash_aset(h, rb_ary_entry(members, i), RSTRUCT_PTR(s)[i]);
+    }
+    return h;
+}
+
 /* :nodoc: */
 VALUE
 rb_struct_init_copy(VALUE copy, VALUE s)
 {
-    if (copy == s) return copy;
-    rb_check_frozen(copy);
-    if (!rb_obj_is_instance_of(s, rb_obj_class(copy))) {
-	rb_raise(rb_eTypeError, "wrong argument class");
-    }
+    if (!OBJ_INIT_COPY(copy, s)) return copy;
     if (RSTRUCT_LEN(copy) != RSTRUCT_LEN(s)) {
 	rb_raise(rb_eTypeError, "struct size mismatch");
     }
@@ -618,7 +631,8 @@ rb_struct_aref_id(VALUE s, ID id)
 	}
     }
     rb_name_error(id, "no member '%s' in struct", rb_id2name(id));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -645,7 +659,7 @@ rb_struct_aref(VALUE s, VALUE idx)
 {
     long i;
 
-    if (TYPE(idx) == T_STRING || TYPE(idx) == T_SYMBOL) {
+    if (RB_TYPE_P(idx, T_STRING) || RB_TYPE_P(idx, T_SYMBOL)) {
 	return rb_struct_aref_id(s, rb_to_id(idx));
     }
 
@@ -682,6 +696,8 @@ rb_struct_aset_id(VALUE s, ID id, VALUE val)
 	}
     }
     rb_name_error(id, "no member '%s' in struct", rb_id2name(id));
+
+    UNREACHABLE;
 }
 
 /*
@@ -710,7 +726,7 @@ rb_struct_aset(VALUE s, VALUE idx, VALUE val)
 {
     long i;
 
-    if (TYPE(idx) == T_STRING || TYPE(idx) == T_SYMBOL) {
+    if (RB_TYPE_P(idx, T_STRING) || RB_TYPE_P(idx, T_SYMBOL)) {
 	return rb_struct_aset_id(s, rb_to_id(idx), val);
     }
 
@@ -777,9 +793,7 @@ rb_struct_select(int argc, VALUE *argv, VALUE s)
     VALUE result;
     long i;
 
-    if (argc > 0) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", argc);
-    }
+    rb_check_arity(argc, 0, 0);
     RETURN_ENUMERATOR(s, 0, 0);
     result = rb_ary_new();
     for (i = 0; i < RSTRUCT_LEN(s); i++) {
@@ -828,7 +842,7 @@ static VALUE
 rb_struct_equal(VALUE s, VALUE s2)
 {
     if (s == s2) return Qtrue;
-    if (TYPE(s2) != T_STRUCT) return Qfalse;
+    if (!RB_TYPE_P(s2, T_STRUCT)) return Qfalse;
     if (rb_obj_class(s) != rb_obj_class(s2)) return Qfalse;
     if (RSTRUCT_LEN(s) != RSTRUCT_LEN(s2)) {
 	rb_bug("inconsistent struct"); /* should never happen */
@@ -898,7 +912,7 @@ static VALUE
 rb_struct_eql(VALUE s, VALUE s2)
 {
     if (s == s2) return Qtrue;
-    if (TYPE(s2) != T_STRUCT) return Qfalse;
+    if (!RB_TYPE_P(s2, T_STRUCT)) return Qfalse;
     if (rb_obj_class(s) != rb_obj_class(s2)) return Qfalse;
     if (RSTRUCT_LEN(s) != RSTRUCT_LEN(s2)) {
 	rb_bug("inconsistent struct"); /* should never happen */
@@ -959,6 +973,7 @@ Init_Struct(void)
     rb_define_method(rb_cStruct, "inspect", rb_struct_inspect, 0);
     rb_define_alias(rb_cStruct,  "to_s", "inspect");
     rb_define_method(rb_cStruct, "to_a", rb_struct_to_a, 0);
+    rb_define_method(rb_cStruct, "to_h", rb_struct_to_h, 0);
     rb_define_method(rb_cStruct, "values", rb_struct_to_a, 0);
     rb_define_method(rb_cStruct, "size", rb_struct_size, 0);
     rb_define_method(rb_cStruct, "length", rb_struct_size, 0);

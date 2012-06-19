@@ -13,6 +13,12 @@ class Complex_Test < Test::Unit::TestCase
     @unify = $".grep(/(?:^|#{seps})mathn(?:\.(?:rb|so))?/).size != 0
   end
 
+  def test_rationalize
+    assert_equal(1.quo(3), Complex(1/3.0, 0).rationalize, '[ruby-core:38885]')
+    assert_equal(1.quo(5), Complex(0.2, 0).rationalize, '[ruby-core:38885]')
+    assert_equal(5.quo(2), Complex(2.5, 0).rationalize(0), '[ruby-core:40667]')
+  end
+
   def test_compsub
     c = ComplexSub.__send__(:convert, 1)
 
@@ -651,10 +657,17 @@ class Complex_Test < Test::Unit::TestCase
       assert_instance_of(Complex, c2)
     end
 
+=begin
     bug3656 = '[ruby-core:31622]'
     assert_raise(TypeError, bug3656) {
       Complex(1,2).marshal_load(0)
     }
+
+    c = Complex(1,2)
+    c.freeze
+    assert(c.frozen?)
+    assert_raise(RuntimeError){c.marshal_load([2,3])}
+=end
   end
 
   def test_parse
@@ -1014,7 +1027,7 @@ class Complex_Test < Test::Unit::TestCase
     end
     assert_equal(Complex(0.5,1.0), Complex(1,2).quo(2))
 
-    unless $".grep(/(\A|\/)complex/).empty?
+    unless $".grep(/(?:\A|(?<!add)\/)complex/).empty?
       assert_equal(Complex(0,2), Math.sqrt(-4.0))
 #      assert_equal(true, Math.sqrt(-4.0).inexact?)
       assert_equal(Complex(0,2), Math.sqrt(-4))

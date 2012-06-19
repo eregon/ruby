@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/local_remote_options'
 require 'rubygems/version_option'
@@ -65,7 +59,7 @@ class Gem::Commands::DependencyCommand < Gem::Command
               end
 
     # TODO: deprecate for real damnit
-    dependency = Deprecate.skip_during {
+    dependency = Gem::Deprecate.skip_during {
       Gem::Dependency.new pattern, options[:version]
     }
     dependency.prerelease = options[:prerelease]

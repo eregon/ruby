@@ -386,7 +386,7 @@ class Pathname
   #   pn.children(false)
   #       # -> [ Pathname:English.rb, Pathname:Env.rb, Pathname:abbrev.rb, ... ]
   #
-  # Note that the result never contain the entries <tt>.</tt> and <tt>..</tt> in
+  # Note that the results never contain the entries <tt>.</tt> and <tt>..</tt> in
   # the directory because they are not children.
   #
   # This method has existed since 1.8.1.
@@ -489,13 +489,16 @@ class Pathname    # * Find *
   # Pathname#find is an iterator to traverse a directory tree in a depth first
   # manner.  It yields a Pathname for each file under "this" directory.
   #
+  # Returns an enumerator if no block is given.
+  #
   # Since it is implemented by <tt>find.rb</tt>, <tt>Find.prune</tt> can be used
-  # to control the traverse.
+  # to control the traversal.
   #
   # If +self+ is <tt>.</tt>, yielded pathnames begin with a filename in the
   # current directory, not <tt>./</tt>.
   #
-  def find(&block) # :yield: pathname
+  def find # :yield: pathname
+    return to_enum(__method__) unless block_given?
     require 'find'
     if @path == '.'
       Find.find(@path) {|f| yield self.class.new(f.sub(%r{\A\./}, '')) }

@@ -200,7 +200,7 @@ module Net
   #
   class IMAP
     include MonitorMixin
-    if defined?(OpenSSL)
+    if defined?(OpenSSL::SSL)
       include OpenSSL
       include SSL
     end
@@ -293,6 +293,22 @@ module Net
     # replaced by the new one.
     def self.add_authenticator(auth_type, authenticator)
       @@authenticators[auth_type] = authenticator
+    end
+
+    # The default port for IMAP connections, port 143
+    def self.default_port
+      return PORT
+    end
+    
+    # The default port for IMAPS connections, port 993
+    def self.default_tls_port
+      return SSL_PORT
+    end
+
+    class << self
+      alias default_imap_port default_port
+      alias default_imaps_port default_tls_port
+      alias default_ssl_port default_tls_port
     end
 
     # Disconnects from the server.
@@ -905,10 +921,15 @@ module Net
           @idle_done_cond = new_cond
           @idle_done_cond.wait
           @idle_done_cond = nil
+          if @receiver_thread_terminating
+            raise Net::IMAP::Error, "connection closed"
+          end
         ensure
-          remove_response_handler(response_handler)
-          put_string("DONE#{CRLF}")
-          response = get_tagged_response(tag, "IDLE")
+          unless @receiver_thread_terminating
+            remove_response_handler(response_handler)
+            put_string("DONE#{CRLF}")
+            response = get_tagged_response(tag, "IDLE")
+          end
         end
       end
 
@@ -934,27 +955,22 @@ module Net
     # Net::IMAP does _not_ automatically encode and decode
     # mailbox names to and from utf7.
     def self.decode_utf7(s)
-      return s.gsub(/&(.*?)-/n) {
-        if $1.empty?
-          "&"
+      return s.gsub(/&([^-]+)?-/n) {
+        if $1
+          ($1.tr(",", "/") + "===").unpack("m")[0].encode(Encoding::UTF_8, Encoding::UTF_16BE)
         else
-          base64 = $1.tr(",", "/")
-          x = base64.length % 4
-          if x > 0
-            base64.concat("=" * (4 - x))
-          end
-          base64.unpack("m")[0].unpack("n*").pack("U*")
+          "&"
         end
-      }.force_encoding("UTF-8")
+      }
     end
 
     # Encode a string from UTF-8 format to modified UTF-7.
     def self.encode_utf7(s)
-      return s.gsub(/(&)|([^\x20-\x7e]+)/u) {
+      return s.gsub(/(&)|[^\x20-\x7e]+/) {
         if $1
           "&-"
         else
-          base64 = [$&.unpack("U*").pack("n*")].pack("m")
+          base64 = [$&.encode(Encoding::UTF_16BE)].pack("m")
           "&" + base64.delete("=\n").tr("/", ",") + "-"
         end
       }.force_encoding("ASCII-8BIT")
@@ -980,7 +996,7 @@ module Net
     @@authenticators = {}
     @@max_flag_count = 10000
 
-    # call-seq:
+    # :call-seq:
     #    Net::IMAP.new(host, options = {})
     #
     # Creates a new Net::IMAP object and connects it to the specified
@@ -1044,6 +1060,10 @@ module Net
       @exception = nil
 
       @greeting = get_response
+      if @greeting.nil?
+        @sock.close
+        raise Error, "connection closed"
+      end
       if @greeting.name == "BYE"
         @sock.close
         raise ByeResponseError, @greeting
@@ -1056,6 +1076,7 @@ module Net
         rescue Exception
         end
       }
+      @receiver_thread_terminating = false
     end
 
     def receive_responses
@@ -1115,8 +1136,12 @@ module Net
         end
       end
       synchronize do
+        @receiver_thread_terminating = true
         @tagged_response_arrival.broadcast
         @continuation_request_arrival.broadcast
+        if @idle_done_cond
+          @idle_done_cond.signal 
+        end
       end
     end
 
@@ -1408,7 +1433,7 @@ module Net
     end
 
     def start_tls_session(params = {})
-      unless defined?(OpenSSL)
+      unless defined?(OpenSSL::SSL)
         raise "SSL extension not installed"
       end
       if @sock.kind_of?(OpenSSL::SSL::SSLSocket)
@@ -1947,6 +1972,26 @@ module Net
       end
     end
 
+    # Net::IMAP::BodyTypeAttachment represents attachment body structures
+    # of messages.
+    #
+    # ==== Fields:
+    #
+    # media_type:: Returns the content media type name.
+    #
+    # subtype:: Returns +nil+.
+    #
+    # param:: Returns a hash that represents parameters.
+    #
+    # multipart?:: Returns false.
+    #
+    class BodyTypeAttachment < Struct.new(:media_type, :subtype,
+                                          :param)
+      def multipart?
+        return false
+      end
+    end
+
     # Net::IMAP::BodyTypeMultipart represents multipart body structures
     # of messages.
     #
@@ -2154,12 +2199,12 @@ module Net
         when "FETCH"
           shift_token
           match(T_SPACE)
-          data = FetchData.new(n, msg_att)
+          data = FetchData.new(n, msg_att(n))
           return UntaggedResponse.new(name, data, @str)
         end
       end
 
-      def msg_att
+      def msg_att(n)
         match(T_LPAR)
         attr = {}
         while true
@@ -2170,7 +2215,7 @@ module Net
             break
           when T_SPACE
             shift_token
-            token = lookahead
+            next
           end
           case token.value
           when /\A(?:ENVELOPE)\z/ni
@@ -2188,7 +2233,7 @@ module Net
           when /\A(?:UID)\z/ni
             name, val = uid_data
           else
-            parse_error("unknown attribute `%s'", token.value)
+            parse_error("unknown attribute `%s' for {%d}", token.value, n)
           end
           attr[name] = val
         end
@@ -2255,6 +2300,11 @@ module Net
       def rfc822_text
         token = match(T_ATOM)
         name = token.value.upcase
+        token = lookahead
+        if token.symbol == T_LBRA
+          shift_token
+          match(T_RBRA)
+        end
         match(T_SPACE)
         return name, nstring
       end
@@ -2312,6 +2362,8 @@ module Net
           return body_type_text
         when /\A(?:MESSAGE)\z/ni
           return body_type_msg
+        when /\A(?:ATTACHMENT)\z/ni
+          return body_type_attachment
         else
           return body_type_basic
         end
@@ -2362,6 +2414,13 @@ module Net
                                    desc, enc, size,
                                    env, b, lines,
                                    md5, disposition, language, extension)
+      end
+
+      def body_type_attachment
+        mtype = case_insensitive_string
+        match(T_SPACE)
+        param = body_fld_param
+        return BodyTypeAttachment.new(mtype, nil, param)
       end
 
       def body_type_mpart

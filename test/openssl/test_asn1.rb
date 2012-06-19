@@ -198,10 +198,47 @@ class  OpenSSL::TestASN1 < Test::Unit::TestCase
     encode_decode_test(OpenSSL::ASN1::Integer, [72, -127, -128, 128, -1, 0, 1, -(2**12345), 2**12345])
   end
 
+  def test_encode_nil
+    m = OpenSSL::ASN1
+    [ 
+      m::Boolean, m::Integer, m::BitString, m::OctetString,
+      m::ObjectId, m::Enumerated, m::UTF8String, m::UTCTime,
+      m::GeneralizedTime, m::Sequence, m::Set
+    ].each do |klass|
+      #Primitives raise TypeError, Constructives NoMethodError
+      assert_raise(TypeError, NoMethodError) { klass.send(:new, nil).to_der }
+    end
+  end
+
   def encode_decode_test(type, values)
     values.each do |v|
       assert_equal(v, OpenSSL::ASN1.decode(type.new(v).to_der).value)
     end
+  end
+
+  def test_decode_pem #should fail gracefully (cf. [ruby-dev:44542])
+    pem = <<-_EOS_
+-----BEGIN CERTIFICATE-----
+MIIC8zCCAdugAwIBAgIBATANBgkqhkiG9w0BAQUFADA9MRMwEQYKCZImiZPyLGQB
+GRYDb3JnMRkwFwYKCZImiZPyLGQBGRYJcnVieS1sYW5nMQswCQYDVQQDDAJDQTAe
+Fw0xMTA5MjUxMzQ4MjZaFw0xMTA5MjUxNDQ4MjZaMD0xEzARBgoJkiaJk/IsZAEZ
+FgNvcmcxGTAXBgoJkiaJk/IsZAEZFglydWJ5LWxhbmcxCzAJBgNVBAMMAkNBMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuV9ht9J7k4NBs38jOXvvTKY9
+gW8nLICSno5EETR1cuF7i4pNs9I1QJGAFAX0BEO4KbzXmuOvfCpD3CU+Slp1enen
+fzq/t/e/1IRW0wkJUJUFQign4CtrkJL+P07yx18UjyPlBXb81ApEmAB5mrJVSrWm
+qbjs07JbuS4QQGGXLc+Su96DkYKmSNVjBiLxVVSpyZfAY3hD37d60uG+X8xdW5v6
+8JkRFIhdGlb6JL8fllf/A/blNwdJOhVr9mESHhwGjwfSeTDPfd8ZLE027E5lyAVX
+9KZYcU00mOX+fdxOSnGqS/8JDRh0EPHDL15RcJjV2J6vZjPb0rOYGDoMcH+94wID
+AQABMA0GCSqGSIb3DQEBBQUAA4IBAQAiAtrIr1pLX4GYN5klviWKb8HC9ICYuAFI
+NfE3FwqzErEVXotuMe3yPVyB3Bv6rjYY/x5EtS5+WPTbHlvHZTkfcsnTpizcn4mW
+dJ6dDRaFCHt1YKKjUxqBt9lvvrc3nReYZN/P+s1mrDhWzGf8iPZgf8sFUHgnaK7W
+CXRVXmPFgCDRNpDDVQ0MQkr509yYfTH+dujNzqTCwSvkyZFyQ7Oe8Yj0VR6kquG3
+rEzBQ0F9dUyqQ9gyRg8KHhDfv9HzT1d/rnUZMkoombwYBRIUChGCYV0GnJcan2Zm
+/93PnPG1IvPjYNd5VlV+sXSnaxQn974HRCsMv7jA8BD6IgSaX6WK
+-----END CERTIFICATE-----
+    _EOS_
+    assert_raise(OpenSSL::ASN1::ASN1Error) { OpenSSL::ASN1.decode(pem) }
+    assert_raise(OpenSSL::ASN1::ASN1Error) { OpenSSL::ASN1.decode_all(pem) }
   end
 
   def test_primitive_cannot_set_infinite_length

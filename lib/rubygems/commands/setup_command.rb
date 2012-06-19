@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 
 ##
@@ -130,7 +124,7 @@ By default, this RubyGems will install gem as:
                       open release_notes do |io|
                         text = io.gets '==='
                         text << io.gets('===')
-                        text[0...-3]
+                        text[0...-3].sub(/^# coding:.*?^=/m, '')
                       end
                     else
                       "Oh-no! Unable to find release notes!"
@@ -258,9 +252,19 @@ TEXT
   end
 
   def make_destination_dirs(install_destdir)
-    lib_dir = nil
-    bin_dir = nil
+    lib_dir, bin_dir = Gem.default_rubygems_dirs
 
+    unless lib_dir
+      lib_dir, bin_dir = generate_default_dirs(install_destdir)
+    end
+
+    mkdir_p lib_dir
+    mkdir_p bin_dir
+
+    return lib_dir, bin_dir
+  end
+
+  def generate_default_dirs(install_destdir)
     prefix = options[:prefix]
     site_or_vendor = options[:site_or_vendor]
 
@@ -289,10 +293,7 @@ TEXT
       bin_dir = File.join install_destdir, bin_dir.gsub(/^[a-zA-Z]:/, '')
     end
 
-    mkdir_p lib_dir
-    mkdir_p bin_dir
-
-    return lib_dir, bin_dir
+    [lib_dir, bin_dir]
   end
 
   def remove_old_bin_files(bin_dir)

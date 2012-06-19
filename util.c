@@ -184,247 +184,100 @@ ruby_strtoul(const char *str, char **endptr, int base)
 #   define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
 #endif
 
-#if defined(__CYGWIN32__) || defined(_WIN32)
-/*
- *  Copyright (c) 1993, Intergraph Corporation
- *
- *  You may distribute under the terms of either the GNU General Public
- *  License or the Artistic License, as specified in the perl README file.
- *
- *  Various Unix compatibility functions and NT specific functions.
- *
- *  Some of this code was derived from the MSDOS port(s) and the OS/2 port.
- *
- */
-
-
-/*
- * Suffix appending for in-place editing under MS-DOS and OS/2 (and now NT!).
- *
- * Here are the rules:
- *
- * Style 0:  Append the suffix exactly as standard perl would do it.
- *           If the filesystem groks it, use it.  (HPFS will always
- *           grok it.  So will NTFS. FAT will rarely accept it.)
- *
- * Style 1:  The suffix begins with a '.'.  The extension is replaced.
- *           If the name matches the original name, use the fallback method.
- *
- * Style 2:  The suffix is a single character, not a '.'.  Try to add the
- *           suffix to the following places, using the first one that works.
- *               [1] Append to extension.
- *               [2] Append to filename,
- *               [3] Replace end of extension,
- *               [4] Replace end of filename.
- *           If the name matches the original name, use the fallback method.
- *
- * Style 3:  Any other case:  Ignore the suffix completely and use the
- *           fallback method.
- *
- * Fallback method:  Change the extension to ".$$$".  If that matches the
- *           original name, then change the extension to ".~~~".
- *
- * If filename is more than 1000 characters long, we die a horrible
- * death.  Sorry.
- *
- * The filename restriction is a cheat so that we can use buf[] to store
- * assorted temporary goo.
- *
- * Examples, assuming style 0 failed.
- *
- * suffix = ".bak" (style 1)
- *                foo.bar => foo.bak
- *                foo.bak => foo.$$$	(fallback)
- *                makefile => makefile.bak
- * suffix = ".$$$" (style 1)
- *                foo.$$$ => foo.~~~	(fallback)
- *
- * suffix = "~" (style 2)
- *                foo.c => foo.c~
- *                foo.c~ => foo.c~~
- *                foo.c~~ => foo~.c~~
- *                foo~.c~~ => foo~~.c~~
- *                foo~~~~~.c~~ => foo~~~~~.$$$ (fallback)
- *
- *                foo.pas => foo~.pas
- *                makefile => makefile.~
- *                longname.fil => longname.fi~
- *                longname.fi~ => longnam~.fi~
- *                longnam~.fi~ => longnam~.$$$
- *
- */
-
-
-static int valid_filename(const char *s);
-
-static const char suffix1[] = ".$$$";
-static const char suffix2[] = ".~~~";
-
-#define strEQ(s1,s2) (strcmp((s1),(s2)) == 0)
-
-void
-ruby_add_suffix(VALUE str, const char *suffix)
-{
-    long baselen;
-    long extlen = strlen(suffix);
-    long slen;
-    char buf[1024];
-    const char *name;
-    const char *ext;
-    long len;
-
-    name = StringValueCStr(str);
-    slen = strlen(name);
-    if (slen > (long)(sizeof(buf) - 1))
-	rb_fatal("Cannot do inplace edit on long filename (%ld characters)",
-		 slen);
-
-    /* Style 0 */
-    rb_str_cat(str, suffix, extlen);
-    if (valid_filename(RSTRING_PTR(str))) return;
-
-    /* Fooey, style 0 failed.  Fix str before continuing. */
-    rb_str_resize(str, slen);
-    name = StringValueCStr(str);
-    ext = ruby_find_extname(name, &len);
-
-    if (*suffix == '.') {        /* Style 1 */
-	if (ext) {
-	    if (strEQ(ext, suffix)) {
-		extlen = sizeof(suffix1) - 1; /* suffix2 must be same length */
-		suffix = strEQ(suffix, suffix1) ? suffix2 : suffix1;
-	    }
-	    slen = ext - name;
-	}
-	rb_str_resize(str, slen);
-	rb_str_cat(str, suffix, extlen);
-    }
-    else {
-	char *p = buf, *q;
-	strncpy(buf, name, slen);
-	if (ext)
-	    p += (ext - name);
-	else
-	    p += slen;
-	p[len] = '\0';
-	if (suffix[1] == '\0') {  /* Style 2 */
-	    q = (char *)ruby_find_basename(buf, &baselen, 0);
-	    if (len <= 3) {
-		if (len == 0 && baselen >= 8 && p + 3 <= buf + sizeof(buf)) p[len++] = '.'; /* DOSISH */
-		p[len] = *suffix;
-		p[++len] = '\0';
-	    }
-	    else if (q && baselen < 8) {
-		q += baselen;
-		*q++ = *suffix;
-		if (ext) {
-		    strncpy(q, ext, ext - name);
-		    q[ext - name + 1] = '\0';
-		}
-		else
-		    *q = '\0';
-	    }
-	    else if (len == 4 && p[3] != *suffix)
-		p[3] = *suffix;
-	    else if (baselen == 8 && q[7] != *suffix)
-		q[7] = *suffix;
-	    else
-		goto fallback;
-	}
-	else { /* Style 3:  Panic */
-	  fallback:
-	    (void)memcpy(p, !ext || strEQ(ext, suffix1) ? suffix2 : suffix1, 5);
-	}
-	rb_str_resize(str, strlen(buf));
-	memcpy(RSTRING_PTR(str), buf, RSTRING_LEN(str));
-    }
-}
-
-static int
-valid_filename(const char *s)
-{
-    int fd;
-
-    /*
-    // It doesn't exist, so see if we can open it.
-    */
-
-    if ((fd = open(s, O_CREAT|O_EXCL, 0666)) >= 0) {
-	close(fd);
-	unlink(s);	/* don't leave it laying around */
-	return 1;
-    }
-    else if (errno == EEXIST) {
-	/* if the file exists, then it's a valid filename! */
-	return 1;
-    }
-    return 0;
-}
-#endif
-
 
 /* mm.c */
 
-#define A ((int*)a)
-#define B ((int*)b)
-#define C ((int*)c)
-#define D ((int*)d)
+#define mmtype long
+#define mmcount (16 / SIZEOF_LONG)
+#define A ((mmtype*)a)
+#define B ((mmtype*)b)
+#define C ((mmtype*)c)
+#define D ((mmtype*)d)
 
+#define mmstep (sizeof(mmtype) * mmcount)
 #define mmprepare(base, size) do {\
- if (((VALUE)(base) & (0x3)) == 0)\
-   if ((size) >= 16) mmkind = 1;\
+ if (((VALUE)(base) % sizeof(mmtype)) == 0 && ((size) % sizeof(mmtype)) == 0) \
+   if ((size) >= mmstep) mmkind = 1;\
    else              mmkind = 0;\
  else                mmkind = -1;\
- high = ((size) & (~0xf));\
- low  = ((size) &  0x0c);\
+ high = ((size) / mmstep) * mmstep;\
+ low  = ((size) % mmstep);\
 } while (0)\
 
 #define mmarg mmkind, size, high, low
+#define mmargdecl int mmkind, size_t size, size_t high, size_t low
 
-static void mmswap_(register char *a, register char *b, int mmkind, size_t size, size_t high, size_t low)
+static void mmswap_(register char *a, register char *b, mmargdecl)
 {
- register int s;
  if (a == b) return;
  if (mmkind >= 0) {
+   register mmtype s;
+#if mmcount > 1
    if (mmkind > 0) {
      register char *t = a + high;
      do {
        s = A[0]; A[0] = B[0]; B[0] = s;
        s = A[1]; A[1] = B[1]; B[1] = s;
+#if mmcount > 2
        s = A[2]; A[2] = B[2]; B[2] = s;
-       s = A[3]; A[3] = B[3]; B[3] = s;  a += 16; b += 16;
+#if mmcount > 3
+       s = A[3]; A[3] = B[3]; B[3] = s;
+#endif
+#endif
+       a += mmstep; b += mmstep;
      } while (a < t);
    }
+#endif
    if (low != 0) { s = A[0]; A[0] = B[0]; B[0] = s;
-     if (low >= 8) { s = A[1]; A[1] = B[1]; B[1] = s;
-       if (low == 12) {s = A[2]; A[2] = B[2]; B[2] = s;}}}
+#if mmcount > 2
+     if (low >= 2 * sizeof(mmtype)) { s = A[1]; A[1] = B[1]; B[1] = s;
+#if mmcount > 3
+       if (low >= 3 * sizeof(mmtype)) {s = A[2]; A[2] = B[2]; B[2] = s;}
+#endif
+     }
+#endif
+   }
  }
  else {
-   register char *t = a + size;
+   register char *t = a + size, s;
    do {s = *a; *a++ = *b; *b++ = s;} while (a < t);
  }
 }
 #define mmswap(a,b) mmswap_((a),(b),mmarg)
 
-static void mmrot3_(register char *a, register char *b, register char *c, int mmkind, size_t size, size_t high, size_t low)
+/* a, b, c = b, c, a */
+static void mmrot3_(register char *a, register char *b, register char *c, mmargdecl)
 {
- register int s;
  if (mmkind >= 0) {
+   register mmtype s;
+#if mmcount > 1
    if (mmkind > 0) {
      register char *t = a + high;
      do {
        s = A[0]; A[0] = B[0]; B[0] = C[0]; C[0] = s;
        s = A[1]; A[1] = B[1]; B[1] = C[1]; C[1] = s;
+#if mmcount > 2
        s = A[2]; A[2] = B[2]; B[2] = C[2]; C[2] = s;
-       s = A[3]; A[3] = B[3]; B[3] = C[3]; C[3] = s; a += 16; b += 16; c += 16;
+#if mmcount > 3
+       s = A[3]; A[3] = B[3]; B[3] = C[3]; C[3] = s;
+#endif
+#endif
+       a += mmstep; b += mmstep; c += mmstep;
      } while (a < t);
    }
+#endif
    if (low != 0) { s = A[0]; A[0] = B[0]; B[0] = C[0]; C[0] = s;
-     if (low >= 8) { s = A[1]; A[1] = B[1]; B[1] = C[1]; C[1] = s;
-       if (low == 12) {s = A[2]; A[2] = B[2]; B[2] = C[2]; C[2] = s;}}}
+#if mmcount > 2
+     if (low >= 2 * sizeof(mmtype)) { s = A[1]; A[1] = B[1]; B[1] = C[1]; C[1] = s;
+#if mmcount > 3
+       if (low == 3 * sizeof(mmtype)) {s = A[2]; A[2] = B[2]; B[2] = C[2]; C[2] = s;}
+#endif
+     }
+#endif
+   }
  }
  else {
-   register char *t = a + size;
+   register char *t = a + size, s;
    do {s = *a; *a++ = *b; *b++ = *c; *c++ = s;} while (a < t);
  }
 }
@@ -447,9 +300,9 @@ typedef struct { char *LL, *RR; } stack_node; /* Stack structure for L,l,R,r */
                        ((*cmp)((b),(c),d)<0 ? (b) : ((*cmp)((a),(c),d)<0 ? (c) : (a))) : \
                        ((*cmp)((b),(c),d)>0 ? (b) : ((*cmp)((a),(c),d)<0 ? (a) : (c))))
 
+typedef int (cmpfunc_t)(const void*, const void*, void*);
 void
-ruby_qsort(void* base, const size_t nel, const size_t size,
-	   int (*cmp)(const void*, const void*, void*), void *d)
+ruby_qsort(void* base, const size_t nel, const size_t size, cmpfunc_t *cmp, void *d)
 {
   register char *l, *r, *m;          	/* l,r:left,right group   m:median point */
   register int t, eq_l, eq_r;       	/* eq_l: all items in left group are equal to S */
@@ -609,6 +462,15 @@ ruby_strdup(const char *str)
     return tmp;
 }
 
+#ifdef __native_client__
+char *
+ruby_getcwd(void)
+{
+    char *buf = xmalloc(2);
+    strcpy(buf, ".");
+    return buf;
+}
+#else
 char *
 ruby_getcwd(void)
 {
@@ -637,6 +499,7 @@ ruby_getcwd(void)
 #endif
     return buf;
 }
+#endif
 
 /****************************************************************
  *
@@ -837,7 +700,7 @@ ruby_getcwd(void)
 
 #ifdef DEBUG
 #include "stdio.h"
-#define Bug(x) {fprintf(stderr, "%s\n", (x)); exit(1);}
+#define Bug(x) {fprintf(stderr, "%s\n", (x)); exit(EXIT_FAILURE);}
 #endif
 
 #include "stdlib.h"
@@ -910,7 +773,7 @@ static double private_mem[PRIVATE_mem], *pmem_next = private_mem;
 #ifdef __cplusplus
 extern "C" {
 #if 0
-}
+} /* satisfy cc-mode */
 #endif
 #endif
 
@@ -2124,8 +1987,11 @@ break2:
 	    nd0 = -4;
 
 	    if (!*++s || !(s1 = strchr(hexdigit, *s))) goto ret0;
-	    while (*s == '0') s++;
-	    if ((s1 = strchr(hexdigit, *s)) != NULL) {
+	    if (*s == '0') {
+		while (*++s == '0');
+		s1 = strchr(hexdigit, *s);
+	    }
+	    if (s1 != NULL) {
 		do {
 		    adj += aadj * ((s1 - hexdigit) & 15);
 		    nd0 += 4;
@@ -4046,7 +3912,7 @@ ruby_hdtoa(double d, const char *xdigs, int ndigits, int *decpt, int *sign,
 
 #ifdef __cplusplus
 #if 0
-{
+{ /* satisfy cc-mode */
 #endif
 }
 #endif

@@ -3,11 +3,11 @@
 require 'thread'
 m = Mutex.new
 r = 0
-max = 1000
+max = 2000
 lmax = max * max
 (1..1).map{
   Thread.new{
-    i=0
+    i = 0
     while i<lmax
       i+=1
       m.synchronize{

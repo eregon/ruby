@@ -149,7 +149,7 @@ To convert C data to Ruby values:
 
     cast to VALUE.
 
-You can determine whether a VALUE is pointer or not by checking its LSB.  
+You can determine whether a VALUE is pointer or not by checking its LSB.
 
 Notice Ruby does not allow arbitrary pointer values to be a VALUE.  They
 should be pointers to the structures which Ruby knows about.  The known
@@ -215,9 +215,9 @@ listed below:
     rb_str_cat2(str, rb_vsprintf(format, ap)), respectively.
 
   rb_enc_str_new(const char *ptr, long len, rb_encoding *enc)
-  
+
     Creates a new Ruby string with the specified encoding.
-     
+
   rb_usascii_str_new(const char *ptr, long len)
   rb_usascii_str_new_cstr(const char *ptr)
 
@@ -284,6 +284,9 @@ listed below:
   rb_ary_shift(VALUE ary)
   rb_ary_unshift(VALUE ary, VALUE val)
 
+  rb_ary_cat(VALUE ary, const VALUE *ptr, long len)
+
+    Appends len elements of objects from ptr to the array.
 
 2. Extending Ruby with C
 
@@ -315,17 +318,17 @@ To define nested classes or modules, use the functions below:
 
 To define methods or singleton methods, use these functions:
 
-  void rb_define_method(VALUE klass, const char *name, 
+  void rb_define_method(VALUE klass, const char *name,
 		        VALUE (*func)(), int argc)
 
-  void rb_define_singleton_method(VALUE object, const char *name, 
+  void rb_define_singleton_method(VALUE object, const char *name,
 			          VALUE (*func)(), int argc)
 
 The `argc' represents the number of the arguments to the C function,
 which must be less than 17.  But I doubt you'll need that many.
 
 If `argc' is negative, it specifies the calling sequence, not number of
-the arguments.  
+the arguments.
 
 If argc is -1, the function will be called as:
 
@@ -345,14 +348,14 @@ actual arguments.
 There are some more functions to define methods. One takes an ID
 as the name of method to be defined. See 2.2.2 for IDs.
 
-  void rb_define_method_id(VALUE klass, ID name, 
+  void rb_define_method_id(VALUE klass, ID name,
                            VALUE (*func)(ANYARGS), int argc)
 
 There are two functions to define private/protected methods:
 
-  void rb_define_private_method(VALUE klass, const char *name, 
+  void rb_define_private_method(VALUE klass, const char *name,
 			        VALUE (*func)(), int argc)
-  void rb_define_protected_method(VALUE klass, const char *name, 
+  void rb_define_protected_method(VALUE klass, const char *name,
 			          VALUE (*func)(), int argc)
 
 At last, rb_define_module_function defines a module functions,
@@ -369,7 +372,7 @@ or
 
 To define module functions, use:
 
-  void rb_define_module_function(VALUE module, const char *name, 
+  void rb_define_module_function(VALUE module, const char *name,
 				 VALUE (*func)(), int argc)
 
 In addition, function-like methods, which are private methods defined
@@ -418,7 +421,7 @@ evaluate the string as Ruby program.  This function will do the job:
 Evaluation is done under the current context, thus current local variables
 of the innermost method (which is defined by Ruby) can be accessed.
 
-Note that the evaluation can raise an exception. There is a safer 
+Note that the evaluation can raise an exception. There is a safer
 function:
 
   VALUE rb_eval_string_protect(const char *str, int *state)
@@ -442,11 +445,21 @@ or
 You can get the ID value from a string within C code by using
 
   rb_intern(const char *name)
+  rb_intern_str(VALUE name)
 
 You can retrieve ID from Ruby object (Symbol or String) given as an
 argument by using
 
   rb_to_id(VALUE symbol)
+  rb_check_id(volatile VALUE *name)
+  rb_check_id_cstr(const char *name, long len, rb_encoding *enc)
+
+These functions try to convert the argument to a String if it was not
+a Symbol nor a String.  The second function stores the converted
+result into *name, and returns 0 if the string is not a known symbol.
+After this function returned a non-zero value, *name is always a
+Symbol or a String, otherwise it is a String if the result is 0.
+The third function takes NUL-terminated C string, not Ruby VALUE.
 
 You can convert C ID to Ruby Symbol by using
 
@@ -582,7 +595,7 @@ Data_Get_Struct().
 
 A pointer to the structure will be assigned to the variable sval.
 
-See the example below for details. 
+See the example below for details.
 
 4. Example - Creating dbm extension
 
@@ -640,7 +653,7 @@ Init_dbm(void)
 }
 --
 
-The dbm extension wraps the dbm struct in the C environment using 
+The dbm extension wraps the dbm struct in the C environment using
 Data_Make_Struct.
 
 --
@@ -742,10 +755,26 @@ need to put
 at the top of the file.  You can use the functions below to check
 various conditions.
 
-  have_library(lib, func): check whether library containing function exists.
-  have_func(func, header): check whether function exists
-  have_header(header): check whether header file exists
-  create_makefile(target): generate Makefile
+  have_macro(macro[, headers[, opt]]): check whether macro is defined
+  have_library(lib[, func[, headers[, opt]]]): check whether library containing function exists
+  find_library(lib[, func, *paths]): find library from paths
+  have_func(func[, headers[, opt]): check whether function exists
+  have_var(var[, headers[, opt]]): check whether variable exists
+  have_header(header[, preheaders[, opt]]): check whether header file exists
+  find_header(header, *paths): find header from paths
+  have_framework(fw): check whether framework exists (for MacOS X)
+  have_struct_member(type, member[, headers[, opt]]): check whether struct has member
+  have_type(type[, headers[, opt]]): check whether type exists
+  find_type(type, opt, *headers): check whether type exists in headers
+  have_const(const[, headers[, opt]]): check whether constant is defined
+  check_sizeof(type[, headers[, opts]]): check size of type
+  check_signedness(type[, headers[, opts]]): check signedness of type
+  convertible_int(type[, headers[, opts]]): find convertible integer type
+  find_executable(bin[, path]): find excutable file path
+  create_header(header): generate configured header
+  create_makefile(target[, target_prefix]): generate Makefile
+
+See MakeMakefile for full documentation of these functions.
 
 The value of the variables below will affect the Makefile.
 
@@ -869,7 +898,7 @@ utility functions
 ruby interpreter implementation
 
   dmyext.c
-  dmydln.c 
+  dmydln.c
   dmyencoding.c
   id.c
   inits.c
@@ -905,7 +934,7 @@ class library
   rational.c    : Rational
   re.c          : Regexp, MatchData
   signal.c      : Signal
-  sprintf.c     : 
+  sprintf.c     :
   string.c      : String
   struct.c      : Struct
   time.c        : Time
@@ -920,7 +949,7 @@ multilingualization
   enc/trans/*   : codepoint mapping tables
 
 goruby interpreter implementation
-  
+
   goruby.c
   golf_prelude.rb     : goruby specific libraries.
     -> golf_prelude.c : automatically generated
@@ -968,7 +997,7 @@ sval, and returns the DATA encapsulating the pointer to memory region.
  Data_Get_Struct(data, type, sval)
 
 This macro retrieves the pointer value from DATA, and assigns it to
-the variable sval. 
+the variable sval.
 
 ** Checking data types
 
@@ -1055,7 +1084,7 @@ The getter function must return the value for the access.
  void rb_define_hooked_variable(const char *name, VALUE *var,
 				VALUE (*getter)(), VALUE (*setter)())
 
-Defines hooked variable.  It's a virtual variable with a C variable.  
+Defines hooked variable.  It's a virtual variable with a C variable.
 The getter is called as
 
 	VALUE getter(ID id, VALUE *var)
@@ -1213,7 +1242,7 @@ arguments.
 Calls the function func1, supplying func2 as the block.  func1 will be
 called with the argument arg1.  func2 receives the value from yield as
 the first argument, arg2 as the second argument.
- 
+
 When rb_iterate is used in 1.9, func1 has to call some Ruby-level method.
 This function is obsolete since 1.9; use rb_block_call instead.
 
@@ -1240,12 +1269,25 @@ Calls the function func with arg as the argument.  If no exception
 occured during func, it returns the result of func and *state is zero.
 Otherwise, it returns Qnil and sets *state to nonzero.  If state is
 NULL, it is not set in both cases.
+You have to clear the error info with rb_set_errinfo(Qnil) when
+ignoring the caught exception.
 
  void rb_jump_tag(int state)
 
 Continues the exception caught by rb_protect() and rb_eval_string_protect().
 state must be the returned value from those functions.  This function
 never return to the caller.
+
+ void rb_iter_break()
+
+Exits from the current innermost block.  This function never return to
+the caller.
+
+ void rb_iter_break_value(VALUE value)
+
+Exits from the current innermost block with the value.  The block will
+return the given argument value.  This function never return to the
+caller.
 
 ** Exceptions and Errors
 
@@ -1366,101 +1408,6 @@ mere st.h.
 
 Means that rb_add_event_hook() takes the third argument `data', to be
 passed to the given event hook function.
-
-Appendix C. Functions Available in extconf.rb
-
-These functions are available in extconf.rb:
-
- have_macro(macro, headers)
-
-Checks whether macro is defined with header.  Returns true if the macro
-is defined.
-
- have_library(lib, func)
-
-Checks whether the library exists, containing the specified function.
-Returns true if the library exists.
-
- find_library(lib, func, path...)
-
-Checks whether a library which contains the specified function exists in
-path.  Returns true if the library exists.
-
- have_func(func, header)
-
-Checks whether func exists with header.  Returns true if the function
-exists.  To check functions in an additional library, you need to
-check that library first using have_library().
-
- have_var(var, header)
-
-Checks whether var exists with header.  Returns true if the variable
-exists.  To check variables in an additional library, you need to
-check that library first using have_library().
-
- have_header(header)
-
-Checks whether header exists.  Returns true if the header file exists.
-
- find_header(header, path...)
-
-Checks whether header exists in path.  Returns true if the header file
-exists.
-
- have_struct_member(type, member, header)
-
-Checks whether type has member with header.  Returns true if the type
-is defined and has the member.
-
- have_type(type, header, opt)
-
-Checks whether type is defined with header.  Returns true if the type
-is defined.
-
- check_sizeof(type, header)
-
-Checks the size of type in char with header.  Returns the size if the
-type is defined, otherwise nil.
-
- create_makefile(target)
-
-Generates the Makefile for the extension library.  If you don't invoke
-this method, the compilation will not be done.
-
- find_executable(bin, path)
-
-Finds command in path, which is File::PATH_SEPARATOR-separated list of
-directories.  If path is nil or omitted, environment variable PATH
-will be used.  Returns the path name of the command if it is found,
-otherwise nil.
-
- with_config(withval[, default=nil])
-
-Parses the command line options and returns the value specified by
---with-<withval>.
-
- enable_config(config, *defaults)
- disable_config(config, *defaults)
-
-Parses the command line options for boolean.  Returns true if
---enable-<config> is given, or false if --disable-<config> is given.
-Otherwise, yields defaults to the given block and returns the result
-if it is called with a block, or returns defaults.
-
- dir_config(target[, default_dir])
- dir_config(target[, default_include, default_lib])
-
-Parses the command line options and adds the directories specified by
---with-<target>-dir, --with-<target>-include, and/or --with-<target>-lib
-to $CFLAGS and/or $LDFLAGS.  --with-<target>-dir=/path is equivalent to
---with-<target>-include=/path/include --with-<target>-lib=/path/lib.
-Returns an array of the added directories ([include_dir, lib_dir]).
-
- pkg_config(pkg)
-
-Obtains the information for pkg by pkg-config command.  The actual
-command name can be overridden by --with-pkg-config command line
-option.
 
 /*
  * Local variables:

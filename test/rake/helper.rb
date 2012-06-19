@@ -1,15 +1,22 @@
 require 'rubygems'
-require 'minitest/unit'
-require 'flexmock/test_unit_integration'
+
+begin
+  gem 'minitest'
+rescue Gem::LoadError
+end
+
 require 'minitest/autorun'
 require 'rake'
 require 'tmpdir'
 require File.expand_path('../file_creation', __FILE__)
 
-class Rake::TestCase < MiniTest::Unit::TestCase
-  include FlexMock::ArgumentTypes
-  include FlexMock::MockContainer
+begin
+  require 'test/ruby/envutil'
+rescue LoadError
+  # for ruby trunk
+end
 
+class Rake::TestCase < MiniTest::Unit::TestCase
   include FileCreation
 
   include Rake::DSL
@@ -17,6 +24,8 @@ class Rake::TestCase < MiniTest::Unit::TestCase
   class TaskManager
     include Rake::TaskManager
   end
+
+  RUBY = defined?(EnvUtil) ? EnvUtil.rubybin : Gem.ruby
 
   def setup
     ARGV.clear
@@ -43,11 +52,10 @@ class Rake::TestCase < MiniTest::Unit::TestCase
 
     Rake.application = Rake::Application.new
     Rake::TaskManager.record_task_metadata = true
+    RakeFileUtils.verbose_flag = false
   end
 
   def teardown
-    flexmock_teardown
-
     Dir.chdir @orig_PWD
     FileUtils.rm_rf @tempdir
 
@@ -274,7 +282,6 @@ end
 task :prep => :clean do
   mkdir_p 'src'
   N.times do |n|
-    puts "DBG: Touching src/foo#{n}"
     touch "src/foo#{n}"
   end
 end
@@ -434,17 +441,6 @@ end
     end
   end
 
-  def rakefile_statusreturn
-    rakefile <<-STATUSRETURN
-task :exit5 do
-  exit(5)
-end
-
-task :normal do
-end
-    STATUSRETURN
-  end
-
   def rakefile_unittest
     rakefile '# Empty Rakefile for Unit Test'
 
@@ -458,43 +454,39 @@ end
     rakefile <<-VERBOSE
 task :standalone_verbose_true do
   verbose true
-  sh "ruby -e '0'"
+  sh "#{RUBY} -e '0'"
 end
 
 task :standalone_verbose_false do
   verbose false
-  sh "ruby -e '0'"
+  sh "#{RUBY} -e '0'"
 end
 
 task :inline_verbose_default do
-  sh "ruby -e '0'"
+  sh "#{RUBY} -e '0'"
 end
 
 task :inline_verbose_false do
-  sh "ruby -e '0'", :verbose => false
+  sh "#{RUBY} -e '0'", :verbose => false
 end
 
 task :inline_verbose_true do
-  sh "ruby -e '0'", :verbose => true
+  sh "#{RUBY} -e '0'", :verbose => true
 end
 
 task :block_verbose_true do
   verbose(true) do
-    sh "ruby -e '0'"
+    sh "#{RUBY} -e '0'"
   end
 end
 
 task :block_verbose_false do
   verbose(false) do
-    sh "ruby -e '0'"
+    sh "#{RUBY} -e '0'"
   end
 end
     VERBOSE
   end
 
 end
-
-# workarounds for 1.8
-$" << 'test/helper.rb'
-Test::Unit.run = true if Test::Unit.respond_to? :run=
 

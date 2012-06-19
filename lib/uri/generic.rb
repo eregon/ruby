@@ -86,8 +86,8 @@ module URI
       rescue InvalidComponentError
         if args.kind_of?(Array)
           return self.build(args.collect{|x|
-            if x
-              parser.escape(x)
+            if x.is_a?(String)
+              DEFAULT_PARSER.escape(x)
             else
               x
             end
@@ -96,7 +96,7 @@ module URI
           tmp = {}
           args.each do |key, value|
             tmp[key] = if value
-                parser.escape(value)
+                DEFAULT_PARSER.escape(value)
               else
                 value
               end
@@ -121,7 +121,7 @@ module URI
     def self.build(args)
       if args.kind_of?(Array) &&
           args.size == ::URI::Generic::COMPONENT.size
-        tmp = args
+        tmp = args.dup
       elsif args.kind_of?(Hash)
         tmp = ::URI::Generic::COMPONENT.collect do |c|
           if args.include?(c)
@@ -131,8 +131,9 @@ module URI
           end
         end
       else
+        component = self.class.component rescue ::URI::Generic::COMPONENT
         raise ArgumentError,
-        "expected Array of or Hash of components of #{self.class} (#{self.class.component.join(', ')})"
+        "expected Array of or Hash of components of #{self.class} (#{component.join(', ')})"
       end
 
       tmp << nil
@@ -339,7 +340,7 @@ module URI
     # see also URI::Generic.scheme=
     #
     def set_scheme(v)
-      @scheme = v
+      @scheme = v ? v.downcase : v
     end
     protected :set_scheme
 
@@ -1239,7 +1240,7 @@ module URI
     # return base and rel.
     # you can modify `base', but can not `rel'.
     def merge0(oth)
-      oth = URI(oth, parser)
+      oth = parser.send(:convert_to_uri, oth)
 
       if self.relative? && oth.relative?
         raise BadURIError,
@@ -1302,7 +1303,7 @@ module URI
 
     # :stopdoc:
     def route_from0(oth)
-      oth = URI(oth, parser)
+      oth = parser.send(:convert_to_uri, oth)
       if self.relative?
         raise BadURIError,
           "relative URI: #{self}"
@@ -1410,7 +1411,7 @@ module URI
     #   #=> #<URI::Generic:0x2020c2f6 URL:/main.rbx?page=1>
     #
     def route_to(oth)
-      URI(oth, parser).route_from(self)
+      parser.send(:convert_to_uri, oth).route_from(self)
     end
 
     #

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 # -*- coding: iso-8859-1 -*-
 #++
 # Copyright (C) 2004 Mauricio Julio Fernández Pradier
@@ -55,8 +49,13 @@ class Gem::Package::TarInput
             sio.rewind
           end
 
-          # TODO use Gem.gunzip
-          gzis = Zlib::GzipReader.new(sio || entry)
+          # Ruby 1.8 doesn't have encoding and YAML is UTF-8
+          args = [sio || entry]
+          args << { :external_encoding => Encoding::UTF_8 } if
+            Object.const_defined?(:Encoding)
+
+          gzis = Zlib::GzipReader.new(*args)
+
           # YAML wants an instance of IO
           @metadata = load_gemspec(gzis)
           has_meta = true
@@ -211,21 +210,25 @@ class Gem::Package::TarInput
   # the unpacking speed) we threw our hands in the air and declared that
   # this method would use the String IO approach on all platforms at all
   # times.  And that's the way it is.
-
+  #
+  # Revisited.  Here's the beginning of the long story.
+  # http://osdir.com/ml/lang.ruby.gems.devel/2007-06/msg00045.html
+  #
+  # StringIO wraping has never worked as a workaround by definition.  Skipping
+  # initial 10 bytes and passing -MAX_WBITS to Zlib::Inflate luckily works as
+  # gzip reader, but it only works if the GZip header is 10 bytes long (see
+  # below) and it does not check inflated stream consistency (CRC value in the
+  # Gzip trailer.)
+  #
+  #   RubyGems generated Gzip Header: 10 bytes
+  #     magic(2) + method(1) + flag(1) + mtime(4) + exflag(1) + os(1) +
+  #     orig_name(0) + comment(0)
+  #
+  # Ideally, it must return a GZipReader without meaningless buffering.  We
+  # have lots of CRuby committers around so let's fix windows build when we
+  # received an error.
   def zipped_stream(entry)
-    if defined? Rubinius or defined? Maglev then
-      # these implementations have working Zlib
-      zis = Zlib::GzipReader.new entry
-      dis = zis.read
-      is = StringIO.new(dis)
-    else
-      # This is Jamis Buck's Zlib workaround for some unknown issue
-      entry.read(10) # skip the gzip header
-      zis = Zlib::Inflate.new(-Zlib::MAX_WBITS)
-      is = StringIO.new(zis.inflate(entry.read))
-    end
-  ensure
-    zis.finish if zis
+    Zlib::GzipReader.new entry
   end
 
 end

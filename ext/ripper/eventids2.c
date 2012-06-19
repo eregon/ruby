@@ -59,7 +59,7 @@ static ID ripper_id_CHAR;
 #include "eventids2table.c"
 
 static void
-ripper_init_eventids2(VALUE self)
+ripper_init_eventids2(void)
 {
     ripper_id_backref = rb_intern_const("on_backref");
     ripper_id_backtick = rb_intern_const("on_backtick");
@@ -108,8 +108,6 @@ ripper_init_eventids2(VALUE self)
     ripper_id_heredoc_end = rb_intern_const("on_heredoc_end");
     ripper_id___end__ = rb_intern_const("on___end__");
     ripper_id_CHAR = rb_intern_const("on_CHAR");
-
-    ripper_init_eventids2_table(self);
 }
 
 static const struct token_assoc {
@@ -235,9 +233,11 @@ static const struct token_assoc {
     {tRPAREN,		&ripper_id_rparen},
     {tRSHFT,		&ripper_id_op},
     {tSTAR,		&ripper_id_op},
+    {tDSTAR,		&ripper_id_op},
     {tSTRING_BEG,	&ripper_id_tstring_beg},
     {tSTRING_CONTENT,	&ripper_id_tstring_content},
     {tSTRING_DBEG,	&ripper_id_embexpr_beg},
+    {tSTRING_DEND,	&ripper_id_embexpr_end},
     {tSTRING_DVAR,	&ripper_id_embvar},
     {tSTRING_END,	&ripper_id_tstring_end},
     {tSYMBEG,		&ripper_id_symbeg},
@@ -276,4 +276,6 @@ ripper_token2eventid(int tok)
         return ripper_id_CHAR;
     }
     rb_raise(rb_eRuntimeError, "[Ripper FATAL] unknown token %d", tok);
+
+    UNREACHABLE;
 }

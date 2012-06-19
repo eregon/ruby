@@ -8,11 +8,11 @@ dll: $(LIBRUBY_SO)
 V = 0
 Q1 = $(V:1=)
 Q = $(Q1:0=@)
-ECHO1 = $(V:1=@:)
 ECHO = $(ECHO1:0=@echo)
 
 RUBYLIB       = -
 RUBYOPT       = -
+RUN_OPTS      = --disable-gems
 
 SPEC_GIT_BASE = git://github.com/rubyspec
 MSPEC_GIT_URL = $(SPEC_GIT_BASE)/mspec.git
@@ -24,6 +24,7 @@ EXTCONF       = extconf.rb
 RBCONFIG      = ./.rbconfig.time
 LIBRUBY_EXTS  = ./.libruby-with-ext.time
 REVISION_H    = ./.revision.time
+PLATFORM_D    = ./$(PLATFORM_DIR)/.time
 RDOCOUT       = $(EXTOUT)/rdoc
 CAPIOUT       = doc/capi
 ID_H_TARGET   = -id.h-
@@ -31,8 +32,9 @@ ID_H_TARGET   = -id.h-
 DMYEXT	      = dmyext.$(OBJEXT)
 NORMALMAINOBJ = main.$(OBJEXT)
 MAINOBJ       = $(NORMALMAINOBJ)
-EXTOBJS	      = 
+EXTOBJS	      =
 DLDOBJS	      = $(DMYEXT)
+EXTSOLIBS     =
 MINIOBJS      = $(ARCHMINIOBJS) dmyencoding.$(OBJEXT) dmyversion.$(OBJEXT) miniprelude.$(OBJEXT)
 ENC_MK        = enc.mk
 
@@ -89,6 +91,7 @@ COMMONOBJS    = array.$(OBJEXT) \
 		iseq.$(OBJEXT) \
 		vm.$(OBJEXT) \
 		vm_dump.$(OBJEXT) \
+		vm_backtrace.$(OBJEXT) \
 		thread.$(OBJEXT) \
 		cont.$(OBJEXT) \
 		$(BUILTIN_ENCOBJS) \
@@ -121,7 +124,8 @@ INSTRUBY      =	$(SUDO) $(MINIRUBY) $(srcdir)/tool/rbinstall.rb
 INSTRUBY_ARGS =	$(SCRIPT_ARGS) \
 		--data-mode=$(INSTALL_DATA_MODE) \
 		--prog-mode=$(INSTALL_PROG_MODE) \
-		--installed-list $(INSTALLED_LIST)
+		--installed-list $(INSTALLED_LIST) \
+		--mantype="$(MANTYPE)"
 INSTALL_PROG_MODE = 0755
 INSTALL_DATA_MODE = 0644
 
@@ -139,7 +143,7 @@ COMPILE_PRELUDE = $(MINIRUBY) -I$(srcdir) $(srcdir)/tool/compile_prelude.rb
 
 all: showflags main docs
 
-main: showflags encs exts
+main: showflags $(EXTSTATIC:static=lib)encs exts
 	@$(NULLCMD)
 
 .PHONY: showflags
@@ -166,15 +170,16 @@ exts: build-ext
 
 EXTS_MK = exts.mk
 $(EXTS_MK): $(MKFILES) incs $(PREP) $(RBCONFIG) $(LIBRUBY)
-	@$(MINIRUBY) $(srcdir)/ext/extmk.rb --make="$(MAKE)" --command-output=$(EXTS_MK) $(EXTMK_ARGS) configure
+	$(ECHO) generating makefile $@
+	$(Q)$(MINIRUBY) $(srcdir)/ext/extmk.rb --make="$(MAKE)" --command-output=$(EXTS_MK) $(EXTMK_ARGS) configure
 
 configure-ext: $(EXTS_MK)
 
 build-ext: $(EXTS_MK)
-	$(Q)$(MAKE) -f $(EXTS_MK) $(MFLAGS)
+	$(Q)$(MAKE) -f $(EXTS_MK) $(MFLAGS) $(EXTSTATIC) LIBRUBY_EXTS=$(LIBRUBY_EXTS) ENCOBJS="$(ENCOBJS)"
 
 $(MKMAIN_CMD): $(MKFILES) incs $(PREP) $(RBCONFIG) $(LIBRUBY)
-	@$(MINIRUBY) $(srcdir)/ext/extmk.rb --make="$(MAKE)" --command-output=$@ $(EXTMK_ARGS)
+	$(Q)$(MINIRUBY) $(srcdir)/ext/extmk.rb --make="$(MAKE)" --command-output=$@ $(EXTMK_ARGS)
 
 prog: program wprogram
 
@@ -190,11 +195,11 @@ golf: $(LIBRUBY) $(GOLFOBJS) PHONY
 	$(Q) $(MAKE) $(MFLAGS) MAINOBJ="$(GOLFOBJS)" PROGRAM=$(GORUBY)$(EXEEXT) program
 capi: $(CAPIOUT)/.timestamp PHONY
 
-doc/capi/.timestamp: Doxyfile $(PREP)
-	$(Q) $(MAKEDIRS) doc/capi
+$(CAPIOUT)/.timestamp: Doxyfile $(PREP)
+	$(Q) $(MAKEDIRS) "$(@D)"
 	$(ECHO) generating capi
 	$(Q) $(DOXYGEN) -b
-	$(Q) $(MINIRUBY) -e 'File.open("$(CAPIOUT)/.timestamp", "w"){|f| f.puts(Time.now)}'
+	$(Q) $(MINIRUBY) -e 'File.open(ARGV[0], "w"){|f| f.puts(Time.now)}' "$@"
 
 Doxyfile: $(srcdir)/template/Doxyfile.tmpl $(PREP) $(srcdir)/tool/generic_erb.rb $(RBCONFIG)
 	$(ECHO) generating $@
@@ -206,7 +211,7 @@ wprogram: showflags $(WPROGRAM)
 
 $(PROGRAM): $(LIBRUBY) $(MAINOBJ) $(OBJS) $(EXTOBJS) $(SETUP) $(PREP)
 
-$(LIBRUBY_A):	$(OBJS) $(DMYEXT) $(ARCHFILE)
+$(LIBRUBY_A):	$(OBJS) $(MAINOBJ) $(DMYEXT) $(ARCHFILE)
 
 $(LIBRUBY_SO):	$(OBJS) $(DLDOBJS) $(LIBRUBY_A) $(PREP) $(LIBRUBY_SO_UPDATE) $(BUILTIN_ENCOBJS)
 
@@ -214,11 +219,11 @@ $(LIBRUBY_EXTS):
 	@exit > $@
 
 $(STATIC_RUBY)$(EXEEXT): $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A)
-	@$(RM) $@
+	$(Q)$(RM) $@
 	$(PURIFY) $(CC) $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)$@ $(LDFLAGS) $(XLDFLAGS)
 
 ruby.imp: $(EXPORTOBJS)
-	@$(NM) -Pgp $(EXPORTOBJS) | \
+	$(Q)$(NM) -Pgp $(EXPORTOBJS) | \
 	awk 'BEGIN{print "#!"}; $$2~/^[BDT]$$/&&$$1!~/^(Init_|.*_threadptr_|\.)/{print $$1}' | \
 	sort -u -o $@
 
@@ -229,32 +234,32 @@ $(ruby_pc): $(srcdir)/template/ruby.pc.in config.status
 
 install-all: docs pre-install-all do-install-all post-install-all
 pre-install-all:: pre-install-local pre-install-ext pre-install-doc
-do-install-all: $(PROGRAM)
+do-install-all: all
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=all --rdoc-output="$(RDOCOUT)"
 post-install-all:: post-install-local post-install-ext post-install-doc
 	@$(NULLCMD)
 
 install-nodoc: pre-install-nodoc do-install-nodoc post-install-nodoc
 pre-install-nodoc:: pre-install-local pre-install-ext
-do-install-nodoc: $(PREP)
-	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --mantype="$(MANTYPE)"
+do-install-nodoc: main
+	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS)
 post-install-nodoc:: post-install-local post-install-ext
 
 install-local: pre-install-local do-install-local post-install-local
 pre-install-local:: pre-install-bin pre-install-lib pre-install-man
-do-install-local: $(PREP)
-	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=local --mantype="$(MANTYPE)"
+do-install-local: $(PROGRAM)
+	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=local
 post-install-local:: post-install-bin post-install-lib post-install-man
 
 install-ext: pre-install-ext do-install-ext post-install-ext
 pre-install-ext:: pre-install-ext-arch pre-install-ext-comm
-do-install-ext: $(PREP)
+do-install-ext: exts
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=ext
 post-install-ext:: post-install-ext-arch post-install-ext-comm
 
 install-arch: pre-install-arch do-install-arch post-install-arch
 pre-install-arch:: pre-install-bin pre-install-ext-arch
-do-install-arch: $(PREP)
+do-install-arch: main
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=bin --install=ext-arch
 post-install-arch:: post-install-bin post-install-ext-arch
 
@@ -266,7 +271,7 @@ post-install-comm:: post-install-lib post-install-ext-comm post-install-man
 
 install-bin: pre-install-bin do-install-bin post-install-bin
 pre-install-bin:: install-prereq
-do-install-bin: $(PREP)
+do-install-bin: $(PROGRAM)
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=bin
 post-install-bin::
 	@$(NULLCMD)
@@ -280,14 +285,14 @@ post-install-lib::
 
 install-ext-comm: pre-install-ext-comm do-install-ext-comm post-install-ext-comm
 pre-install-ext-comm:: install-prereq
-do-install-ext-comm: $(PREP)
+do-install-ext-comm: exts
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=ext-comm
 post-install-ext-comm::
 	@$(NULLCMD)
 
 install-ext-arch: pre-install-ext-arch do-install-ext-arch post-install-ext-arch
 pre-install-ext-arch:: install-prereq
-do-install-ext-arch: $(PREP)
+do-install-ext-arch: exts
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=ext-arch
 post-install-ext-arch::
 	@$(NULLCMD)
@@ -295,7 +300,7 @@ post-install-ext-arch::
 install-man: pre-install-man do-install-man post-install-man
 pre-install-man:: install-prereq
 do-install-man: $(PREP)
-	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=man --mantype="$(MANTYPE)"
+	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=man
 post-install-man::
 	@$(NULLCMD)
 
@@ -320,14 +325,14 @@ what-where-nodoc: no-install-nodoc
 no-install-nodoc: pre-no-install-nodoc dont-install-nodoc post-no-install-nodoc
 pre-no-install-nodoc:: pre-no-install-local pre-no-install-ext
 dont-install-nodoc:  $(PREP)
-	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS) --mantype="$(MANTYPE)"
+	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS)
 post-no-install-nodoc:: post-no-install-local post-no-install-ext
 
 what-where-local: no-install-local
 no-install-local: pre-no-install-local dont-install-local post-no-install-local
 pre-no-install-local:: pre-no-install-bin pre-no-install-lib pre-no-install-man
 dont-install-local: $(PREP)
-	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS) --install=local --mantype="$(MANTYPE)"
+	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS) --install=local
 post-no-install-local:: post-no-install-bin post-no-install-lib post-no-install-man
 
 what-where-ext: no-install-ext
@@ -387,7 +392,7 @@ what-where-man: no-install-man
 no-install-man: pre-no-install-man dont-install-man post-no-install-man
 pre-no-install-man:: install-prereq
 dont-install-man: $(PREP)
-	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS) --install=man --mantype="$(MANTYPE)"
+	$(INSTRUBY) -n --make="$(MAKE)" $(INSTRUBY_ARGS) --install=man
 post-no-install-man::
 	@$(NULLCMD)
 
@@ -423,85 +428,91 @@ install-prereq: $(CLEAR_INSTALLED_LIST) PHONY
 clear-installed-list: PHONY
 	@> $(INSTALLED_LIST) set MAKE="$(MAKE)"
 
-clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout
+clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout clean-platform
 clean-local:: PHONY
-	@$(RM) $(OBJS) $(MINIOBJS) $(MAINOBJ) $(LIBRUBY_A) $(LIBRUBY_SO) $(LIBRUBY) $(LIBRUBY_ALIASES)
-	@$(RM) $(PROGRAM) $(WPROGRAM) miniruby$(EXEEXT) dmyext.$(OBJEXT) $(ARCHFILE) .*.time
-	@$(RM) y.tab.c y.output encdb.h transdb.h prelude.c config.log rbconfig.rb $(ruby_pc)
+	$(Q)$(RM) $(OBJS) $(MINIOBJS) $(MAINOBJ) $(LIBRUBY_A) $(LIBRUBY_SO) $(LIBRUBY) $(LIBRUBY_ALIASES)
+	$(Q)$(RM) $(PROGRAM) $(WPROGRAM) miniruby$(EXEEXT) dmyext.$(OBJEXT) $(ARCHFILE) .*.time
+	$(Q)$(RM) y.tab.c y.output encdb.h transdb.h prelude.c config.log rbconfig.rb $(ruby_pc)
 clean-ext:: PHONY
 clean-golf: PHONY
-	@$(RM) $(GORUBY)$(EXEEXT) $(GOLFOBJS)
+	$(Q)$(RM) $(GORUBY)$(EXEEXT) $(GOLFOBJS)
 clean-rdoc: PHONY
 clean-capi: PHONY
+clean-platform: PHONY
 clean-extout: PHONY
 clean-docs: clean-rdoc clean-capi
 
-distclean: distclean-ext distclean-local distclean-enc distclean-golf distclean-extout
+distclean: distclean-ext distclean-local distclean-enc distclean-golf distclean-extout distclean-platform
 distclean-local:: clean-local
-	@$(RM) $(MKFILES) yasmdata.rb *.inc
-	@$(RM) config.cache config.status config.status.lineno $(PRELUDES)
-	@$(RM) *~ *.bak *.stackdump core *.core gmon.out $(PREP)
+	$(Q)$(RM) $(MKFILES) yasmdata.rb *.inc
+	$(Q)$(RM) config.cache config.status config.status.lineno $(PRELUDES)
+	$(Q)$(RM) *~ *.bak *.stackdump core *.core gmon.out $(PREP)
 distclean-ext:: PHONY
 distclean-golf: clean-golf
-	@$(RM) $(GOLFPRELUDES)
+	$(Q)$(RM) $(GOLFPRELUDES)
 distclean-rdoc: PHONY
 distclean-capi: PHONY
 distclean-extout: clean-extout
+distclean-platform: clean-platform
 
 realclean:: realclean-ext realclean-local realclean-enc realclean-golf realclean-extout
 realclean-local:: distclean-local
-	@$(RM) parse.c parse.h lex.c newline.c revision.h
+	$(Q)$(RM) parse.c parse.h lex.c newline.c revision.h
 realclean-ext::
 realclean-golf: distclean-golf
 realclean-capi: PHONY
 realclean-extout: distclean-extout
 
+clean-ext distclean-ext realclean-ext::
+	$(Q)$(RM) $(EXTS_MK)
+
 clean-enc distclean-enc realclean-enc: PHONY
 
-check: test test-all
+check: main test test-all
+	$(ECHO) check succeeded
 check-ruby: test test-ruby
 
-btest: miniruby$(EXEEXT) $(TEST_RUNNABLE)-btest
+btest: $(TEST_RUNNABLE)-btest
 no-btest: PHONY
-yes-btest: PHONY
-	$(BOOTSTRAPRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(MINIRUBY)" $(OPTS)
+yes-btest: miniruby$(EXEEXT) PHONY
+	$(BOOTSTRAPRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(BTESTRUBY)" $(OPTS) $(TESTOPTS)
 
-btest-ruby: miniruby$(EXEEXT) $(RBCONFIG) $(PROGRAM) $(TEST_RUNNABLE)-btest-ruby
+btest-ruby: $(TEST_RUNNABLE)-btest-ruby
 no-btest-ruby: PHONY
-yes-btest-ruby: PHONY
-	@$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM) -I$(srcdir)/lib" -q $(OPTS)
+yes-btest-ruby: prog PHONY
+	$(Q)$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM) -I$(srcdir)/lib" -q $(OPTS) $(TESTOPTS)
 
-test-sample: miniruby$(EXEEXT) $(RBCONFIG) $(PROGRAM) $(TEST_RUNNABLE)-test-sample
+test-sample: $(TEST_RUNNABLE)-test-sample
 no-test-sample: PHONY
-yes-test-sample: PHONY
-	@$(RUNRUBY) $(srcdir)/tool/rubytest.rb
+yes-test-sample: prog PHONY
+	$(Q)$(RUNRUBY) $(srcdir)/tool/rubytest.rb $(OPTS) $(TESTOPTS)
 
 test-knownbugs: test-knownbug
-test-knownbug: miniruby$(EXEEXT) $(PROGRAM) $(RBCONFIG) $(TEST_RUNNABLE)-test-knownbug
+test-knownbug: $(TEST_RUNNABLE)-test-knownbug
 no-test-knownbug: PHONY
-yes-test-knownbug: PHONY
-	-$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM)" $(OPTS) $(srcdir)/KNOWNBUGS.rb
+yes-test-knownbug: prog PHONY
+	-$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM)" $(OPTS) $(TESTOPTS) $(srcdir)/KNOWNBUGS.rb
 
 test: test-sample btest-ruby test-knownbug
 
 test-all: $(TEST_RUNNABLE)-test-all
-yes-test-all: PHONY
-	$(RUNRUBY) "$(srcdir)/test/runner.rb" --ruby="$(RUNRUBY)" $(TESTS)
+yes-test-all: prog PHONY
+	$(RUNRUBY) "$(srcdir)/test/runner.rb" --ruby="$(RUNRUBY)" $(TESTOPTS) $(TESTS)
 TESTS_BUILD = mkmf
 no-test-all: PHONY
-	$(MINIRUBY) -I"$(srcdir)/lib" "$(srcdir)/test/runner.rb" $(TESTS_BUILD)
+	$(MINIRUBY) -I"$(srcdir)/lib" "$(srcdir)/test/runner.rb" $(TESTOPTS) $(TESTS_BUILD)
 
 test-ruby: $(TEST_RUNNABLE)-test-ruby
 no-test-ruby: PHONY
-yes-test-ruby: PHONY
-	$(RUNRUBY) "$(srcdir)/test/runner.rb" ruby
+yes-test-ruby: prog encs PHONY
+	$(RUNRUBY) "$(srcdir)/test/runner.rb" -q $(TESTOPTS) $(TESTS) ruby
 
 extconf: $(PREP)
 	$(Q) $(MAKEDIRS) "$(EXTCONFDIR)"
 	$(RUNRUBY) -C "$(EXTCONFDIR)" $(EXTCONF) $(EXTCONFARGS)
 
 $(RBCONFIG): $(srcdir)/tool/mkconfig.rb config.status $(srcdir)/version.h $(PREP)
-	@$(MINIRUBY) $(srcdir)/tool/mkconfig.rb -timestamp=$@ \
+	$(Q)$(MINIRUBY) $(srcdir)/tool/mkconfig.rb -timestamp=$@ \
 		-install_name=$(RUBY_INSTALL_NAME) \
 		-so_name=$(RUBY_SO_NAME) rbconfig.rb
 
@@ -511,17 +522,21 @@ test-rubyspec: test-rubyspec-precheck
 	$(RUNRUBY) $(srcdir)/spec/mspec/bin/mspec run -B $(srcdir)/spec/default.mspec $(MSPECOPT)
 
 encs: enc trans
-encs enc trans: showflags $(ENC_MK) $(LIBRUBY) $(PREP)
+libencs: libenc libtrans
+encs enc trans libencs libenc libtrans: showflags $(ENC_MK) $(LIBRUBY) $(PREP)
 	$(ECHO) making $@
-	$(Q) $(MAKE) -f $(ENC_MK) RUBY="$(MINIRUBY)" MINIRUBY="$(MINIRUBY)" $(MFLAGS) $@
+	$(Q) $(MAKE) -f $(ENC_MK) V="$(V)" \
+		RUBY="$(MINIRUBY)" MINIRUBY="$(MINIRUBY)" \
+		$(MFLAGS) $@
 
-enc: {$(VPATH)}encdb.h
-trans: {$(VPATH)}transdb.h
+
+libenc enc: {$(VPATH)}encdb.h
+libtrans trans: {$(VPATH)}transdb.h
 
 $(ENC_MK): $(srcdir)/enc/make_encmake.rb $(srcdir)/enc/Makefile.in $(srcdir)/enc/depend \
-	$(srcdir)/lib/mkmf.rb $(RBCONFIG)
+	$(srcdir)/enc/encinit.c.erb $(srcdir)/lib/mkmf.rb $(RBCONFIG)
 	$(ECHO) generating $@
-	$(Q) $(MINIRUBY) $(srcdir)/enc/make_encmake.rb --builtin-encs="$(BUILTIN_ENCOBJS)" --builtin-transes="$(BUILTIN_TRANSOBJS)" $@ $(ENCS)
+	$(Q) $(MINIRUBY) $(srcdir)/enc/make_encmake.rb --builtin-encs="$(BUILTIN_ENCOBJS)" --builtin-transes="$(BUILTIN_TRANSOBJS)" --module$(EXTSTATIC) $@ $(ENCS)
 
 .PRECIOUS: $(MKFILES)
 
@@ -541,12 +556,13 @@ PHONY:
 parse.h {$(VPATH)}parse.h: {$(VPATH)}parse.c
 
 {$(srcdir)}.y.c:
-	$(YACC) -d $(YFLAGS) -o y.tab.c $(SRC_FILE)
-	sed -f $(srcdir)/tool/ytab.sed -e "/^#/s!y\.tab\.c!$@!" y.tab.c > $@.new
-	@$(MV) $@.new $@
-	sed -e "/^#line.*y\.tab\.h/d;/^#line.*parse\.y/d" y.tab.h > $(@:.c=.h).new
-	@$(IFCHANGE) $(@:.c=.h) $(@:.c=.h).new
-	@$(RM) y.tab.c y.tab.h
+	$(ECHO) generating $@
+	$(Q)$(YACC) -d $(YFLAGS) -o y.tab.c $(SRC_FILE)
+	$(Q)sed -f $(srcdir)/tool/ytab.sed -e "/^#/s!y\.tab\.c!$@!" y.tab.c > $@.new
+	$(Q)$(MV) $@.new $@
+	$(Q)sed -e "/^#line.*y\.tab\.h/d;/^#line.*parse\.y/d" y.tab.h > $(@:.c=.h).new
+	$(Q)$(IFCHANGE) $(@:.c=.h) $(@:.c=.h).new
+	$(Q)$(RM) y.tab.c y.tab.h
 
 acosh.$(OBJEXT): {$(VPATH)}acosh.c
 alloca.$(OBJEXT): {$(VPATH)}alloca.c {$(VPATH)}config.h
@@ -570,7 +586,12 @@ dl_os2.$(OBJEXT): {$(VPATH)}dl_os2.c
 ia64.$(OBJEXT): {$(VPATH)}ia64.s
 	$(CC) $(CFLAGS) -c $<
 
-win32.$(OBJEXT): {$(VPATH)}win32.c $(RUBY_H_INCLUDES)
+$(PLATFORM_D):
+	$(Q) $(MAKEDIRS) $(PLATFORM_DIR)
+	@exit > $@
+
+win32/win32.$(OBJEXT): {$(VPATH)}win32/win32.c $(RUBY_H_INCLUDES) $(PLATFORM_D)
+win32/file.$(OBJEXT): {$(VPATH)}win32/file.c $(RUBY_H_INCLUDES) $(PLATFORM_D)
 
 ###
 
@@ -608,7 +629,8 @@ encoding.$(OBJEXT): {$(VPATH)}encoding.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}internal.h
 enum.$(OBJEXT): {$(VPATH)}enum.c $(RUBY_H_INCLUDES) {$(VPATH)}node.h \
   {$(VPATH)}util.h $(ID_H_INCLUDES)
-enumerator.$(OBJEXT): {$(VPATH)}enumerator.c $(RUBY_H_INCLUDES)
+enumerator.$(OBJEXT): {$(VPATH)}enumerator.c $(RUBY_H_INCLUDES) \
+  {$(VPATH)}internal.h
 error.$(OBJEXT): {$(VPATH)}error.c {$(VPATH)}known_errors.inc \
   $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) $(ENCODING_H_INCLUDES) \
   {$(VPATH)}debug.h \
@@ -713,7 +735,8 @@ variable.$(OBJEXT): {$(VPATH)}variable.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}node.h {$(VPATH)}util.h {$(VPATH)}encoding.h \
   {$(VPATH)}oniguruma.h {$(VPATH)}internal.h {$(VPATH)}constant.h
 version.$(OBJEXT): {$(VPATH)}version.c $(RUBY_H_INCLUDES) \
-  {$(VPATH)}version.h $(srcdir)/version.h $(srcdir)/revision.h {$(VPATH)}config.h
+  {$(VPATH)}version.h $(srcdir)/version.h $(srcdir)/revision.h {$(VPATH)}config.h \
+  verconf.h
 dmyversion.$(OBJEXT): {$(VPATH)}dmyversion.c version.$(OBJEXT)
 
 compile.$(OBJEXT): {$(VPATH)}compile.c {$(VPATH)}iseq.h \
@@ -732,11 +755,15 @@ vm.$(OBJEXT): {$(VPATH)}vm.c {$(VPATH)}gc.h {$(VPATH)}iseq.h \
   {$(VPATH)}vm.inc {$(VPATH)}insns.inc {$(VPATH)}debug.h \
   {$(VPATH)}internal.h {$(VPATH)}vm.h {$(VPATH)}constant.h
 vm_dump.$(OBJEXT): {$(VPATH)}vm_dump.c $(RUBY_H_INCLUDES) \
-  $(VM_CORE_H_INCLUDES) {$(VPATH)}debug.h {$(VPATH)}addr2line.h
+  $(VM_CORE_H_INCLUDES) {$(VPATH)}debug.h {$(VPATH)}addr2line.h \
+  {$(VPATH)}internal.h
 debug.$(OBJEXT): {$(VPATH)}debug.c $(RUBY_H_INCLUDES) \
   $(ENCODING_H_INCLUDES) $(VM_CORE_H_INCLUDES) {$(VPATH)}eval_intern.h \
   {$(VPATH)}util.h {$(VPATH)}debug.h
 id.$(OBJEXT): {$(VPATH)}id.c $(RUBY_H_INCLUDES) $(ID_H_INCLUDES)
+vm_backtrace.$(OBJEXT): {$(VPATH)}vm_backtrace.c \
+  $(VM_CORE_H_INCLUDES) $(RUBY_H_INCLUDES) \
+  {$(VPATH)}internal.h {$(VPATH)}iseq.h
 miniprelude.$(OBJEXT): {$(VPATH)}miniprelude.c $(RUBY_H_INCLUDES) \
   $(VM_CORE_H_INCLUDES) {$(VPATH)}debug.h {$(VPATH)}internal.h
 prelude.$(OBJEXT): {$(VPATH)}prelude.c $(RUBY_H_INCLUDES) \
@@ -759,9 +786,9 @@ unicode.$(OBJEXT): {$(VPATH)}unicode.c {$(VPATH)}regint.h \
 utf_8.$(OBJEXT): {$(VPATH)}utf_8.c {$(VPATH)}regenc.h {$(VPATH)}config.h \
   {$(VPATH)}oniguruma.h {$(VPATH)}missing.h
 
-newline.c: $(srcdir)/enc/trans/newline.trans $(srcdir)/tool/transcode-tblgen.rb
-	$(Q) $(BASERUBY) "$(srcdir)/tool/transcode-tblgen.rb" -vo newline.c $(srcdir)/enc/trans/newline.trans
-newline.$(OBJEXT): {$(VPATH)}newline.c {$(VPATH)}defines.h \
+$(NEWLINE_C): $(srcdir)/enc/trans/newline.trans $(srcdir)/tool/transcode-tblgen.rb
+	$(Q) $(BASERUBY) "$(srcdir)/tool/transcode-tblgen.rb" -vo $@ $(srcdir)/enc/trans/newline.trans
+newline.$(OBJEXT): $(NEWLINE_C) {$(VPATH)}defines.h \
   {$(VPATH)}intern.h {$(VPATH)}missing.h {$(VPATH)}st.h \
   {$(VPATH)}transcode_data.h {$(VPATH)}ruby.h {$(VPATH)}config.h {$(VPATH)}subst.h
 
@@ -806,7 +833,8 @@ id.h: parse.h $(srcdir)/tool/generic_erb.rb $(srcdir)/template/id.h.tmpl
 		$(srcdir)/template/id.h.tmpl --vpath=$(VPATH) parse.h
 
 node_name.inc: {$(VPATH)}node.h
-	$(BASERUBY) -n $(srcdir)/tool/node_name.rb < $? > $@
+	$(ECHO) generating $@
+	$(Q) $(BASERUBY) -n $(srcdir)/tool/node_name.rb < $? > $@
 
 encdb.h: $(PREP) $(srcdir)/tool/generic_erb.rb $(srcdir)/template/encdb.h.tmpl
 	$(ECHO) generating $@
@@ -816,11 +844,13 @@ transdb.h: $(PREP) srcs-enc $(srcdir)/tool/generic_erb.rb $(srcdir)/template/tra
 	$(ECHO) generating $@
 	$(Q) $(MINIRUBY) $(srcdir)/tool/generic_erb.rb -c -o $@ $(srcdir)/template/transdb.h.tmpl $(srcdir)/enc/trans enc/trans
 
+enc/encinit.c: $(ENC_MK) $(srcdir)/enc/encinit.c.erb
+
 known_errors.inc: $(srcdir)/template/known_errors.inc.tmpl $(srcdir)/defs/known_errors.def
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) $(srcdir)/tool/generic_erb.rb -c -o $@ $(srcdir)/template/known_errors.inc.tmpl $(srcdir)/defs/known_errors.def
 
-miniprelude.c: $(srcdir)/tool/compile_prelude.rb $(srcdir)/prelude.rb
+$(MINIPRELUDE_C): $(srcdir)/tool/compile_prelude.rb $(srcdir)/prelude.rb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) -I$(srcdir) $(srcdir)/tool/compile_prelude.rb $(srcdir)/prelude.rb $@
 
@@ -843,15 +873,15 @@ $(srcdir)/revision.h:
 	@exit > $@
 
 $(REVISION_H): $(srcdir)/version.h $(srcdir)/ChangeLog $(srcdir)/tool/file2lastrev.rb $(REVISION_FORCE)
-	@-$(BASERUBY) $(srcdir)/tool/file2lastrev.rb --revision.h "$(srcdir)" > "$(srcdir)/revision.tmp"
-	@$(IFCHANGE) "--timestamp=$@" "$(srcdir)/revision.h" "$(srcdir)/revision.tmp"
+	-$(Q) $(BASERUBY) $(srcdir)/tool/file2lastrev.rb --revision.h "$(srcdir)" > revision.tmp
+	$(Q)$(IFCHANGE) "--timestamp=$@" "$(srcdir)/revision.h" revision.tmp
 
-$(srcdir)/ext/ripper/ripper.c:
+$(srcdir)/ext/ripper/ripper.c: parse.y
 	$(ECHO) generating $@
 	$(Q) $(CHDIR) $(@D) && $(exec) $(MAKE) -f depend $(MFLAGS) \
 		Q=$(Q) ECHO=$(ECHO) top_srcdir=../.. srcdir=. RUBY=$(BASERUBY)
 
-$(srcdir)/ext/json/parser/parser.c:
+$(srcdir)/ext/json/parser/parser.c: $(srcdir)/ext/json/parser/parser.rl
 	$(ECHO) generating $@
 	$(Q) $(CHDIR) $(@D) && $(exec) $(MAKE) -f prereq.mk $(MFLAGS) \
 		Q=$(Q) ECHO=$(ECHO) top_srcdir=../../.. srcdir=.
@@ -868,8 +898,8 @@ parse: miniruby$(EXEEXT) PHONY
 	$(MINIRUBY) $(srcdir)/tool/parse.rb $(TESTRUN_SCRIPT)
 
 COMPARE_RUBY = $(BASERUBY)
-ITEM = 
-OPTS = 
+ITEM =
+OPTS =
 
 benchmark: $(PROGRAM) PHONY
 	$(BASERUBY) $(srcdir)/benchmark/driver.rb -v \
@@ -910,7 +940,7 @@ dist:
 	$(BASERUBY) $(srcdir)/tool/make-snapshot tmp $(RELNAME)
 
 up::
-	-@$(MAKE) $(MFLAGS) REVISION_FORCE=PHONY "$(REVISION_H)"
+	-$(Q)$(MAKE) $(MFLAGS) REVISION_FORCE=PHONY "$(REVISION_H)"
 
 info: info-program info-libruby_a info-libruby_so info-arch
 info-program:
@@ -929,7 +959,7 @@ love: sudo-precheck up all test install test-all
 	@echo love is all you need
 
 sudo-precheck:
-	@$(SUDO) true
+	@$(SUDO) echo > $(NULL)
 
 help: PHONY
 	$(MESSAGE_BEGIN) \
@@ -961,5 +991,5 @@ help: PHONY
 	"  golf:            for golfers" \
 	"" \
 	"see DeveloperHowto for more detail: " \
-	"  http://redmine.ruby-lang.org/wiki/ruby/DeveloperHowto" \
+	"  http://bugs.ruby-lang.org/wiki/ruby/DeveloperHowto" \
 	$(MESSAGE_END)

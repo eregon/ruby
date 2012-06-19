@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems'
 require 'rubygems/format'
 require 'time'
@@ -383,7 +377,7 @@ class Gem::Indexer
   # Collect specifications from .gem files from the gem directory.
 
   def collect_specs(gems = gem_file_list)
-    Deprecate.skip_during do
+    Gem::Deprecate.skip_during do
       index = Gem::SourceIndex.new
 
       map_gems_to_specs(gems).each do |spec|

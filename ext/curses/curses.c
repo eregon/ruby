@@ -63,6 +63,7 @@
 static VALUE mCurses;
 static VALUE mKey;
 static VALUE cWindow;
+static VALUE cPad;
 #ifdef USE_MOUSE
 static VALUE cMouseEvent;
 #endif
@@ -86,17 +87,33 @@ no_window(void)
 #define GetWINDOW(obj, winp) do {\
     if (!OBJ_TAINTED(obj) && rb_safe_level() >= 4)\
 	rb_raise(rb_eSecurityError, "Insecure: operation on untainted window");\
-    Data_Get_Struct((obj), struct windata, (winp));\
+    TypedData_Get_Struct((obj), struct windata, &windata_type, (winp));\
     if ((winp)->window == 0) no_window();\
 } while (0)
 
 static void
-free_window(struct windata *winp)
+window_free(void *p)
 {
+    struct windata *winp = p;
     if (winp->window && winp->window != stdscr) delwin(winp->window);
     winp->window = 0;
     xfree(winp);
 }
+
+static size_t
+window_memsize(const void *p)
+{
+    const struct windata *winp = p;
+    size_t size = sizeof(*winp);
+    if (!winp) return 0;
+    if (winp->window && winp->window != stdscr) size += sizeof(winp->window);
+    return size;
+}
+
+static const rb_data_type_t windata_type = {
+    "windata",
+    {0, window_free, window_memsize,}
+};
 
 static VALUE
 prep_window(VALUE class, WINDOW *window)
@@ -109,7 +126,7 @@ prep_window(VALUE class, WINDOW *window)
     }
 
     obj = rb_obj_alloc(class);
-    Data_Get_Struct(obj, struct windata, winp);
+    TypedData_Get_Struct(obj, struct windata, &windata_type, winp);
     winp->window = window;
 
     return obj;
@@ -1222,7 +1239,7 @@ static VALUE
 curses_pair_number(VALUE obj, VALUE attrs)
 {
     curses_stdscr();
-    return INT2FIX(PAIR_NUMBER(NUM2INT(attrs)));
+    return INT2FIX(PAIR_NUMBER(NUM2LONG(attrs)));
 }
 #endif /* USE_COLOR */
 
@@ -1240,16 +1257,32 @@ no_mevent(void)
 #define GetMOUSE(obj, data) do {\
     if (!OBJ_TAINTED(obj) && rb_safe_level() >= 4)\
 	rb_raise(rb_eSecurityError, "Insecure: operation on untainted mouse");\
-    Data_Get_Struct((obj), struct mousedata, (data));\
+    TypedData_Get_Struct((obj), struct mousedata, &mousedata_type, (data));\
     if ((data)->mevent == 0) no_mevent();\
 } while (0)
 
 static void
-curses_mousedata_free(struct mousedata *mdata)
+curses_mousedata_free(void *p)
 {
+    struct mousedata *mdata = p;
     if (mdata->mevent)
 	xfree(mdata->mevent);
 }
+
+static size_t
+curses_mousedata_memsize(const void *p)
+{
+    const struct mousedata *mdata = p;
+    size_t size = sizeof(*mdata);
+    if (!mdata) return 0;
+    if (mdata->mevent) size += sizeof(mdata->mevent);
+    return size;
+}
+
+static const rb_data_type_t mousedata_type = {
+    "mousedata",
+    {0, curses_mousedata_free, curses_mousedata_memsize,}
+};
 
 /*
  * Document-method: Curses.getmouse
@@ -1267,8 +1300,8 @@ curses_getmouse(VALUE obj)
     VALUE val;
 
     curses_stdscr();
-    val = Data_Make_Struct(cMouseEvent,struct mousedata,
-			   0,curses_mousedata_free,mdata);
+    val = TypedData_Make_Struct(cMouseEvent,struct mousedata,
+				&mousedata_type,mdata);
     mdata->mevent = (MEVENT*)xmalloc(sizeof(MEVENT));
     return (getmouse(mdata->mevent) == OK) ? val : Qnil;
 }
@@ -1437,7 +1470,7 @@ window_s_allocate(VALUE class)
 {
     struct windata *winp;
 
-    return Data_Make_Struct(class, struct windata, 0, free_window, winp);
+    return TypedData_Make_Struct(class, struct windata, &windata_type, winp);
 }
 
 /*
@@ -1459,7 +1492,7 @@ window_initialize(VALUE obj, VALUE h, VALUE w, VALUE top, VALUE left)
 
     rb_secure(4);
     curses_init_screen();
-    Data_Get_Struct(obj, struct windata, winp);
+    TypedData_Get_Struct(obj, struct windata, &windata_type, winp);
     if (winp->window) delwin(winp->window);
     window = newwin(NUM2INT(h), NUM2INT(w), NUM2INT(top), NUM2INT(left));
     wclear(window);
@@ -1633,6 +1666,7 @@ window_cury(VALUE obj)
 
     GetWINDOW(obj, winp);
     getyx(winp->window, y, x);
+    (void)x;
     return INT2FIX(y);
 }
 
@@ -1649,6 +1683,7 @@ window_curx(VALUE obj)
 
     GetWINDOW(obj, winp);
     getyx(winp->window, y, x);
+    (void)y;
     return INT2FIX(x);
 }
 
@@ -1669,6 +1704,7 @@ window_maxy(VALUE obj)
     {
 	int x, y;
 	getmaxyx(winp->window, y, x);
+	(void)x;
 	return INT2FIX(y);
     }
 #else
@@ -1693,6 +1729,7 @@ window_maxx(VALUE obj)
     {
 	int x, y;
 	getmaxyx(winp->window, y, x);
+	(void)y;
 	return INT2FIX(x);
     }
 #else
@@ -1714,10 +1751,11 @@ window_begy(VALUE obj)
     GetWINDOW(obj, winp);
 #ifdef getbegyx
     getbegyx(winp->window, y, x);
-    return INT2FIX(y);
+    (void)x;
 #else
-    return INT2FIX(winp->window->_begy);
+    y = winp->window->_begy;
 #endif
+    return INT2FIX(y);
 }
 
 /*
@@ -1734,10 +1772,11 @@ window_begx(VALUE obj)
     GetWINDOW(obj, winp);
 #ifdef getbegyx
     getbegyx(winp->window, y, x);
-    return INT2FIX(x);
+    (void)y;
 #else
-    return INT2FIX(winp->window->_begx);
+    x = winp->window->_begx;
 #endif
+    return INT2FIX(x);
 }
 
 /*
@@ -2406,11 +2445,14 @@ window_keypad(VALUE obj, VALUE val)
 #ifdef HAVE_NODELAY
 /*
  * Document-method: Curses::Window.nodelay
- * call-seq: nodelay(bool)
+ * call-seq:
+ *   window.nodelay = bool
  *
- * Causes Curses::Window.getch to be a non-blocking call.  If no input is ready, getch returns ERR.
+ * When in no-delay mode Curses::Window#getch is a non-blocking call.  If no
+ * input is ready #getch returns ERR.
  *
- * If disabled (+bool+ is +false+), Curses::Window.getch waits until a key is pressed.
+ * When in delay mode (+bool+ is +false+ which is the default),
+ * Curses::Window#getch blocks until a key is pressed.
  *
  */
 static VALUE
@@ -2454,6 +2496,137 @@ window_timeout(VALUE obj, VALUE delay)
 #else
 #define window_timeout rb_f_notimplement
 #endif
+
+/*--------------------------- class Pad ----------------------------*/
+
+#ifdef HAVE_NEWPAD
+/*
+ * Document-method: Curses::Pad.new
+ *
+ * call-seq:
+ *   new(height, width)
+ *
+ * Contruct a new Curses::Pad with constraints of +height+ lines, +width+
+ * columns
+ *
+ */
+static VALUE
+pad_initialize(VALUE obj, VALUE h, VALUE w)
+{
+    struct windata *padp;
+    WINDOW *window;
+
+    rb_secure(4);
+    curses_init_screen();
+    TypedData_Get_Struct(obj, struct windata, &windata_type, padp);
+    if (padp->window) delwin(padp->window);
+    window = newpad(NUM2INT(h), NUM2INT(w));
+    wclear(window);
+    padp->window = window;
+
+    return obj;
+}
+
+#if 1
+#define pad_subpad window_subwin
+#else
+/*
+ * Document-method: Curses::Pad.subpad
+ * call-seq:
+ *   subpad(height, width, begin_x, begin_y)
+ *
+ * Contruct a new subpad with constraints of +height+ lines, +width+ columns,
+ * begin at +begin_x+ line, and +begin_y+ columns on the pad.
+ *
+ */
+static VALUE
+pad_subpad(VALUE obj, VALUE height, VALUE width, VALUE begin_x, VALUE begin_y)
+{
+    struct windata *padp;
+    WINDOW *subpad;
+    VALUE pad;
+    int h, w, x, y;
+
+    h = NUM2INT(height);
+    w = NUM2INT(width);
+    x = NUM2INT(begin_x);
+    y = NUM2INT(begin_y);
+    GetWINDOW(obj, padp);
+    subpad = subwin(padp->window, h, w, x, y);
+    pad = prep_window(rb_obj_class(obj), subpad);
+
+    return pad;
+}
+#endif
+
+/*
+ * Document-method: Curses::Pad.refresh
+ *
+ * call-seq:
+ *   pad.refresh(pad_minrow, pad_mincol, screen_minrow, screen_mincol, screen_maxrow, screen_maxcol)
+ *
+ * Refreshes the pad.  +pad_minrow+ and pad_mincol+ define the upper-left
+ * corner of the rectangle to be displayed.  +screen_minrow+, +screen_mincol+,
+ * +screen_maxrow+, +screen_maxcol+ define the edges of the rectangle to be
+ * displayed on the screen.
+ *
+ */
+static VALUE
+pad_refresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
+	    VALUE smincol, VALUE smaxrow, VALUE smaxcol)
+{
+    struct windata *padp;
+    int pmr, pmc, smr, smc, sxr, sxc;
+
+    pmr = NUM2INT(pminrow);
+    pmc = NUM2INT(pmincol);
+    smr = NUM2INT(sminrow);
+    smc = NUM2INT(smincol);
+    sxr = NUM2INT(smaxrow);
+    sxc = NUM2INT(smaxcol);
+
+    GetWINDOW(obj, padp);
+    prefresh(padp->window, pmr, pmc, smr, smc, sxr, sxc);
+
+    return Qnil;
+}
+
+/*
+ * Document-method: Curses::Pad.noutrefresh
+ *
+ * call-seq:
+ *   pad.noutrefresh(pad_minrow, pad_mincol, screen_minrow, screen_mincol, screen_maxrow, screen_maxcol)
+ *
+ * Refreshes the pad.  +pad_minrow+ and pad_mincol+ define the upper-left
+ * corner of the rectangle to be displayed.  +screen_minrow+, +screen_mincol+,
+ * +screen_maxrow+, +screen_maxcol+ define the edges of the rectangle to be
+ * displayed on the screen.
+ *
+ */
+static VALUE
+pad_noutrefresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
+		VALUE smincol, VALUE smaxrow, VALUE smaxcol)
+{
+    struct windata *padp;
+    int pmr, pmc, smr, smc, sxr, sxc;
+
+    pmr = NUM2INT(pminrow);
+    pmc = NUM2INT(pmincol);
+    smr = NUM2INT(sminrow);
+    smc = NUM2INT(smincol);
+    sxr = NUM2INT(smaxrow);
+    sxc = NUM2INT(smaxcol);
+
+    GetWINDOW(obj, padp);
+#ifdef HAVE_DOUPDATE
+    pnoutrefresh(padp->window, pmr, pmc, smr, smc, sxr, sxc);
+#else
+    prefresh(padp->window, pmr, pmc, smr, smc, sxr, sxc);
+#endif
+
+    return Qnil;
+}
+#endif /* HAVE_NEWPAD */
 
 /*------------------------- Initialization -------------------------*/
 
@@ -2604,6 +2777,32 @@ Init_curses(void)
     rb_define_module_function(mCurses, "def_prog_mode", curses_def_prog_mode, 0);
     rb_define_module_function(mCurses, "reset_prog_mode", curses_reset_prog_mode, 0);
 
+    {
+        VALUE version;
+#if defined(HAVE_FUNC_CURSES_VERSION)
+        /* ncurses and PDcurses */
+        version = rb_str_new2(curses_version());
+#elif defined(HAVE_VAR_CURSES_VERSION)
+        /* SVR4 curses has an undocumented and undeclared variable, curses_version.
+         * It contains a string, "SVR4".  */
+        RUBY_EXTERN char *curses_version;
+        version = rb_sprintf("curses (%s)", curses_version);
+#else
+        /* BSD curses, perhaps.  NetBSD 5 still use it. */ 
+        version = rb_str_new2("curses (unknown)");
+#endif
+        /*
+         * Identifies curses library version.
+         *
+         * - "ncurses 5.9.20110404"
+         * - "PDCurses 3.4 - Public Domain 2008"
+         * - "curses (SVR4)" (System V curses)
+         * - "curses (unknown)" (The original BSD curses?  NetBSD maybe.)
+         *
+         */
+        rb_define_const(mCurses, "VERSION", version);
+    }
+
     /*
      * Document-class: Curses::Window
      *
@@ -2685,6 +2884,26 @@ Init_curses(void)
 
     rb_define_method(cWindow, "nodelay=", window_nodelay, 1);
     rb_define_method(cWindow, "timeout=", window_timeout, 1);
+
+#ifdef HAVE_NEWPAD
+    /*
+     * Document-class: Curses::Pad
+     *
+     * == Description
+     *
+     * A Pad is like a Window but allows for scrolling of contents that cannot
+     * fit on the screen.  Pads do not refresh automatically, use Pad#refresh
+     * or Pad#noutrefresh instead.
+     *
+     */
+    cPad = rb_define_class_under(mCurses, "Pad", cWindow);
+    /* inherits alloc_func from cWindow */
+    rb_define_method(cPad, "initialize", pad_initialize, 2);
+    rb_define_method(cPad, "subpad", pad_subpad, 4);
+    rb_define_method(cPad, "refresh", pad_refresh, 6);
+    rb_define_method(cPad, "noutrefresh", pad_noutrefresh, 6);
+    rb_undef_method(cPad, "subwin");
+#endif
 
 #define rb_curses_define_const(c) rb_define_const(mCurses,#c,UINT2NUM(c))
 

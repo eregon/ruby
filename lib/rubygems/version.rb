@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 ##
 # The Version class processes string versions into comparable
 # values. A version string should normally be a series of numbers
@@ -224,6 +218,10 @@ class Gem::Version
     @hash ||= segments.hash
   end
 
+  def init_with coder # :nodoc:
+    yaml_initialize coder.tag, coder.map
+  end
+
   def inspect # :nodoc:
     "#<#{self.class} #{version.inspect}>"
   end
@@ -242,6 +240,12 @@ class Gem::Version
 
   def marshal_load array
     initialize array[0]
+  end
+
+  def yaml_initialize(tag, map)
+    @version = map['version']
+    @segments = nil
+    @hash = nil
   end
 
   ##

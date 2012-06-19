@@ -721,6 +721,10 @@ class Rational_Test < Test::Unit::TestCase
     assert_equal([Rational(2),Rational(1)], Rational(1).coerce(2))
     assert_equal([Rational(2.2),Rational(1)], Rational(1).coerce(2.2))
     assert_equal([Rational(2),Rational(1)], Rational(1).coerce(Rational(2)))
+
+    assert_nothing_raised(TypeError, '[Bug #5020] [ruby-devl:44088]') do
+      Rational(1,2).coerce(Complex(1,1))
+    end
   end
 
   class ObjectX
@@ -819,6 +823,7 @@ class Rational_Test < Test::Unit::TestCase
     assert_equal(9, c2.instance_variable_get(:@ivar))
     assert_instance_of(Rational, c2)
 
+=begin
     assert_raise(ZeroDivisionError){
       Marshal.load("\x04\bU:\rRational[\ai\x06i\x05")
     }
@@ -827,6 +832,12 @@ class Rational_Test < Test::Unit::TestCase
     assert_raise(TypeError, bug3656) {
       Rational(1,2).marshal_load(0)
     }
+
+    c = Rational(1,2)
+    c.freeze
+    assert(c.frozen?)
+    assert_raise(RuntimeError){c.marshal_load([2,3])}
+=end
   end
 
   def test_parse

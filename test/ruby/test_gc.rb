@@ -1,5 +1,7 @@
 require 'test/unit'
 
+require_relative "envutil"
+
 class TestGc < Test::Unit::TestCase
   class S
     def initialize(a)
@@ -65,8 +67,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_singleton_method
-    prev_stress = GC.stress
-    assert_nothing_raised("[ruby-dev:42832]") do
+    assert_in_out_err(%w[--disable-gems], <<-EOS, [], [], "[ruby-dev:42832]")
       GC.stress = true
       10.times do
         obj = Object.new
@@ -74,8 +75,38 @@ class TestGc < Test::Unit::TestCase
         def obj.bar() raise "obj.foo is called, but this is obj.bar" end
         obj.foo
       end
-    end
-  ensure
-    GC.stress = prev_stress
+    EOS
+  end
+
+  def test_singleton_method_added
+    assert_in_out_err(%w[--disable-gems], <<-EOS, [], [], "[ruby-dev:44436]")
+      class BasicObject
+        undef singleton_method_added
+        def singleton_method_added(mid)
+          raise
+        end
+      end
+      b = proc {}
+      class << b; end
+      b.clone rescue nil
+      GC.start
+    EOS
+  end
+
+  def test_gc_parameter
+    env = {
+      "RUBY_GC_MALLOC_LIMIT" => "60000000",
+      "RUBY_HEAP_MIN_SLOTS" => "100000"
+    }
+    assert_normal_exit("exit", "[ruby-core:39777]", :child_env => env)
+
+    env = {
+      "RUBYOPT" => "",
+      "RUBY_HEAP_MIN_SLOTS" => "100000"
+    }
+    assert_in_out_err([env, "-e", "exit"], "", [], [], "[ruby-core:39795]")
+    assert_in_out_err([env, "-W0", "-e", "exit"], "", [], [], "[ruby-core:39795]")
+    assert_in_out_err([env, "-W1", "-e", "exit"], "", [], [], "[ruby-core:39795]")
+    assert_in_out_err([env, "-w", "-e", "exit"], "", [], /heap_min_slots=100000/, "[ruby-core:39795]")
   end
 end

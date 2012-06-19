@@ -1,3 +1,24 @@
+require 'prettyprint'
+
+module Kernel
+  # returns a pretty printed object as a string.
+  def pretty_inspect
+    PP.pp(self, '')
+  end
+
+  private
+  # prints arguments in pretty form.
+  #
+  # pp returns argument(s).
+  def pp(*objs) # :doc:
+    objs.each {|obj|
+      PP.pp(obj)
+    }
+    objs.size <= 1 ? objs.first : objs
+  end
+  module_function :pp
+end
+
 # == Pretty-printer for Ruby objects.
 #
 # = Which seems better?
@@ -27,11 +48,13 @@
 #
 # = Usage
 #
-#   pp(obj)
+#   pp(obj)             #=> obj
+#   pp(obj1, obj2, ...) #=> [obj1, obj2, ...]
+#   pp()                #=> nil
 #
-# output +obj+ to +$>+ in pretty printed format.
+# output +obj(s)+ to +$>+ in pretty printed format.
 #
-# It returns +nil+.
+# It returns +obj(s)+.
 #
 # = Output Customization
 # To define your customized pretty printing function for your classes,
@@ -42,28 +65,6 @@
 #
 # = Author
 # Tanaka Akira <akr@m17n.org>
-
-require 'prettyprint'
-
-module Kernel
-  # returns a pretty printed object as a string.
-  def pretty_inspect
-    PP.pp(self, '')
-  end
-
-  private
-  # prints arguments in pretty form.
-  #
-  # pp returns argument(s).
-  def pp(*objs) # :doc:
-    objs.each {|obj|
-      PP.pp(obj)
-    }
-    objs.size <= 1 ? objs.first : objs
-  end
-  module_function :pp
-end
-
 class PP < PrettyPrint
   # Outputs +obj+ to +out+ in pretty printed format of
   # +width+ columns in width.

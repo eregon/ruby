@@ -174,6 +174,7 @@ static int passwd_blocking = 0;
 static VALUE
 passwd_ensure(void)
 {
+    endpwent();
     passwd_blocking = (int)Qfalse;
     return Qnil;
 }
@@ -187,7 +188,6 @@ passwd_iterate(void)
     while (pw = getpwent()) {
 	rb_yield(setup_passwd(pw));
     }
-    endpwent();
     return Qnil;
 }
 
@@ -412,6 +412,7 @@ static int group_blocking = 0;
 static VALUE
 group_ensure(void)
 {
+    endgrent();
     group_blocking = (int)Qfalse;
     return Qnil;
 }
@@ -425,7 +426,6 @@ group_iterate(void)
     while (pw = getgrent()) {
 	rb_yield(setup_group(pw));
     }
-    endgrent();
     return Qnil;
 }
 
@@ -566,7 +566,9 @@ VALUE rb_w32_conv_from_wchar(const WCHAR *wstr, rb_encoding *enc);
 #endif
 
 /*
- * Returns system configuration directory.
+ * Returns system configuration directory. This is typically "/etc", but
+ * is modified by the prefix used when Ruby was compiled. For example,
+ * if Ruby is built and installed in /usr/local, returns "/usr/local/etc".
  */
 static VALUE
 etc_sysconfdir(VALUE obj)
@@ -579,7 +581,7 @@ etc_sysconfdir(VALUE obj)
 }
 
 /*
- * Returns system temporary directory.
+ * Returns system temporary directory; typically "/tmp".
  */
 static VALUE
 etc_systmpdir(void)
@@ -598,9 +600,25 @@ etc_systmpdir(void)
 }
 
 /*
- * The etc module provides access to information from the running OS.
+ * The Etc module provides access to information typically stored in
+ * files in the /etc directory on Unix systems.
  *
- * Documented by mathew <meta@pobox.com>.
+ * The information accessible consists of the information found in the
+ * /etc/passwd and /etc/group files, plus information about the system's
+ * temporary directory (/tmp) and configuration directory (/etc).
+ *
+ * The Etc module provides a more reliable way to access information about
+ * the logged in user than environment variables such as $USER. For example:
+ *
+ *     require 'etc'
+ *
+ *     login = Etc.getlogin
+ *     info = Etc.getpwnam(login)
+ *     username = info.gecos.split(/,/).first
+ *     puts "Hello #{username}, I see your login name is #{login}"
+ *
+ * Note that the methods provided by this module are not always secure.
+ * It should be used for informational purposes, and not for security.
  */
 void
 Init_etc(void)

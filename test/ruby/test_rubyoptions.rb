@@ -418,7 +418,7 @@ class TestRubyOptions < Test::Unit::TestCase
   end
 
   def test_set_program_name
-    skip "platform dependent feature" if /linux|freebsd|netbsd|openbsd/ !~ RUBY_PLATFORM
+    skip "platform dependent feature" if /linux|freebsd|netbsd|openbsd|darwin/ !~ RUBY_PLATFORM
 
     with_tmpchdir do
       write_file("test-script", "$0 = 'hello world'; sleep 60")
@@ -514,7 +514,7 @@ class TestRubyOptions < Test::Unit::TestCase
     IO.pipe {|r, w|
       begin
         PTY.open {|m, s|
-          m.echo = false
+          s.echo = false
           m.print("\C-d")
           pid = spawn(EnvUtil.rubybin, :in => s, :out => w)
           w.close
@@ -530,7 +530,7 @@ class TestRubyOptions < Test::Unit::TestCase
     assert_equal("", result, '[ruby-dev:37798]')
     IO.pipe {|r, w|
       PTY.open {|m, s|
-	m.echo = false
+	s.echo = false
 	pid = spawn(EnvUtil.rubybin, :in => s, :out => w)
 	w.close
 	m.print("$stdin.read; p $stdin.gets\n\C-d")
@@ -552,5 +552,10 @@ class TestRubyOptions < Test::Unit::TestCase
       File.unlink(File.join(dir, a))
       assert_in_out_err(["-C", dir, a], "", [], /LoadError/, bug3851)
     end
+  end
+
+  def test_script_is_directory
+    feature2408 = '[ruby-core:26925]'
+    assert_in_out_err(%w[.], "", [], /Is a directory -- \./, feature2408)
   end
 end

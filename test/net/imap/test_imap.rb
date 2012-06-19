@@ -18,16 +18,26 @@ class IMAPTest < Test::Unit::TestCase
   end
 
   def test_encode_utf7
+    assert_equal("foo", Net::IMAP.encode_utf7("foo"))
+    assert_equal("&-", Net::IMAP.encode_utf7("&"))
+
     utf8 = "\357\274\241\357\274\242\357\274\243".force_encoding("UTF-8")
     s = Net::IMAP.encode_utf7(utf8)
-    assert_equal("&,yH,Iv8j-".force_encoding("UTF-8"), s)
+    assert_equal("&,yH,Iv8j-", s)
+    s = Net::IMAP.encode_utf7("foo&#{utf8}-bar".encode("EUC-JP"))
+    assert_equal("foo&-&,yH,Iv8j--bar", s)
 
     utf8 = "\343\201\202&".force_encoding("UTF-8")
     s = Net::IMAP.encode_utf7(utf8)
-    assert_equal("&MEI-&-".force_encoding("UTF-8"), s)
+    assert_equal("&MEI-&-", s)
+    s = Net::IMAP.encode_utf7(utf8.encode("EUC-JP"))
+    assert_equal("&MEI-&-", s)
   end
 
   def test_decode_utf7
+    assert_equal("&", Net::IMAP.decode_utf7("&-"))
+    assert_equal("&-", Net::IMAP.decode_utf7("&--"))
+
     s = Net::IMAP.decode_utf7("&,yH,Iv8j-")
     utf8 = "\357\274\241\357\274\242\357\274\243".force_encoding("UTF-8")
     assert_equal(utf8, s)
@@ -45,8 +55,8 @@ class IMAPTest < Test::Unit::TestCase
     assert_match(/\A24-Jul-2009 01:23 [+\-]\d{4}\z/, s)
   end
 
-  def test_imaps_unknown_ca
-    if defined?(OpenSSL)
+  if defined?(OpenSSL::SSL::SSLError)
+    def test_imaps_unknown_ca
       assert_raise(OpenSSL::SSL::SSLError) do
         imaps_test do |port|
           begin
@@ -59,10 +69,8 @@ class IMAPTest < Test::Unit::TestCase
         end
       end
     end
-  end
 
-  def test_imaps_with_ca_file
-    if defined?(OpenSSL)
+    def test_imaps_with_ca_file
       assert_nothing_raised do
         imaps_test do |port|
           begin
@@ -75,10 +83,8 @@ class IMAPTest < Test::Unit::TestCase
         end
       end
     end
-  end
 
-  def test_imaps_verify_none
-    if defined?(OpenSSL)
+    def test_imaps_verify_none
       assert_nothing_raised do
         imaps_test do |port|
           Net::IMAP.new(SERVER_ADDR,
@@ -87,10 +93,8 @@ class IMAPTest < Test::Unit::TestCase
         end
       end
     end
-  end
 
-  def test_imaps_post_connection_check
-    if defined?(OpenSSL)
+    def test_imaps_post_connection_check
       assert_raise(OpenSSL::SSL::SSLError) do
         imaps_test do |port|
           # SERVER_ADDR is different from the hostname in the certificate,
@@ -103,20 +107,20 @@ class IMAPTest < Test::Unit::TestCase
     end
   end
 
-  def test_starttls
-    imap = nil
-    if defined?(OpenSSL)
+  if defined?(OpenSSL::SSL)
+    def test_starttls
+      imap = nil
       starttls_test do |port|
         imap = Net::IMAP.new("localhost", :port => port)
         imap.starttls(:ca_file => CA_FILE)
         imap
       end
-    end
-  rescue SystemCallError
-    skip $!
-  ensure
-    if imap && !imap.disconnected?
-      imap.disconnect
+    rescue SystemCallError
+      skip $!
+    ensure
+      if imap && !imap.disconnected?
+        imap.disconnect
+      end
     end
   end
 
@@ -361,6 +365,88 @@ class IMAPTest < Test::Unit::TestCase
     ensure
       server.close
     end
+  end
+
+  def test_connection_closed_during_idle
+    server = create_tcp_server
+    port = server.addr[1]
+    requests = []
+    sock = nil
+    Thread.start do
+      begin
+        sock = server.accept
+        sock.print("* OK test server\r\n")
+        requests.push(sock.gets)
+        sock.print("+ idling\r\n")
+      rescue
+      end
+    end
+    begin
+      imap = Net::IMAP.new(SERVER_ADDR, :port => port)
+      begin
+        th = Thread.current
+        m = Monitor.new
+        in_idle = false
+        exception_raised = false
+        c = m.new_cond
+        Thread.start do
+          m.synchronize do
+            until in_idle
+              c.wait(0.1)
+            end
+          end
+          sock.close
+          exception_raised = true
+        end
+        assert_raise(Net::IMAP::Error) do
+          imap.idle do |res|
+            m.synchronize do
+              in_idle = true
+              c.signal
+              until exception_raised
+                c.wait(0.1)
+              end
+            end
+          end
+        end
+        assert_equal(1, requests.length)
+        assert_equal("RUBY0001 IDLE\r\n", requests[0])
+      ensure
+        imap.disconnect if imap
+      end
+    ensure
+      server.close
+      if sock && !sock.closed?
+        sock.close
+      end
+    end
+  end
+
+  def test_connection_closed_without_greeting
+    server = create_tcp_server
+    port = server.addr[1]
+    Thread.start do
+      begin
+        sock = server.accept
+        sock.close
+      rescue
+      end
+    end
+    begin
+      assert_raise(Net::IMAP::Error) do
+        Net::IMAP.new(SERVER_ADDR, :port => port)
+      end
+    ensure
+      server.close
+    end
+  end
+
+  def test_default_port
+    assert_equal(143, Net::IMAP.default_port)
+    assert_equal(143, Net::IMAP.default_imap_port)
+    assert_equal(993, Net::IMAP.default_tls_port)
+    assert_equal(993, Net::IMAP.default_ssl_port)
+    assert_equal(993, Net::IMAP.default_imaps_port)
   end
 
   private

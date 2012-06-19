@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/installer'
 
@@ -124,7 +118,9 @@ class Gem::InstallerTestCase < Gem::TestCase
       FileUtils.mkdir_p 'bin'
       FileUtils.mkdir_p 'lib'
       FileUtils.mkdir_p File.join('ext', 'a')
-      File.open File.join('bin', 'executable'), 'w' do |f| f.puts '1' end
+      File.open File.join('bin', 'executable'), 'w' do |f|
+        f.puts "raise 'ran executable'"
+      end
       File.open File.join('lib', 'code.rb'), 'w' do |f| f.puts '1' end
       File.open File.join('ext', 'a', 'mkrf_conf.rb'), 'w' do |f|
         f << <<-EOF

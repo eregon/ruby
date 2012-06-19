@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -38,7 +32,7 @@ module Kernel
   # that file has already been loaded is preserved.
 
   def require path
-    if Gem.unresolved_deps.empty? or Gem.loaded_path? path then
+    if Gem.unresolved_deps.empty? then
       gem_original_require path
     else
       spec = Gem::Specification.find { |s|
@@ -61,7 +55,8 @@ module Kernel
       return gem_original_require path
     end
   rescue LoadError => load_error
-    if load_error.message.end_with?(path) and Gem.try_activate(path) then
+    if load_error.message.start_with?("Could not find") or
+        (load_error.message.end_with?(path) and Gem.try_activate(path)) then
       return gem_original_require(path)
     end
 

@@ -1,5 +1,6 @@
 require 'test/unit'
 require 'continuation'
+require 'stringio'
 
 class TestEnumerable < Test::Unit::TestCase
   def setup
@@ -12,6 +13,16 @@ class TestEnumerable < Test::Unit::TestCase
         yield 3
         yield 1
         yield 2
+        self
+      end
+    end
+    @empty = Object.new
+    class << @empty
+      attr_reader :block
+      include Enumerable
+      def each(&block)
+        @block = block
+        self
       end
     end
     @verbose = $VERBOSE
@@ -22,11 +33,29 @@ class TestEnumerable < Test::Unit::TestCase
     $VERBOSE = @verbose
   end
 
+  def assert_not_warn
+    begin
+      org_stderr = $stderr
+      v = $VERBOSE
+      $stderr = StringIO.new(warn = '')
+      $VERBOSE = true
+      yield
+    ensure
+      $stderr = org_stderr
+      $VERBOSE = v
+    end
+    assert_equal("", warn)
+  end
+
   def test_grep
     assert_equal([1, 2, 1, 2], @obj.grep(1..2))
     a = []
     @obj.grep(2) {|x| a << x }
     assert_equal([2, 2], a)
+
+    bug5801 = '[ruby-dev:45041]'
+    @empty.grep(//)
+    assert_nothing_raised(bug5801) {100.times {@empty.block.call}}
   end
 
   def test_count
@@ -94,6 +123,7 @@ class TestEnumerable < Test::Unit::TestCase
   def test_first
     assert_equal(1, @obj.first)
     assert_equal([1, 2, 3], @obj.first(3))
+    assert_nil(@empty.first)
   end
 
   def test_sort
@@ -260,6 +290,10 @@ class TestEnumerable < Test::Unit::TestCase
 
   def test_take_while
     assert_equal([1,2], @obj.take_while {|x| x <= 2})
+
+    bug5801 = '[ruby-dev:45040]'
+    @empty.take_while {true}
+    assert_nothing_raised(bug5801) {100.times {@empty.block.call}}
   end
 
   def test_drop
@@ -383,6 +417,7 @@ class TestEnumerable < Test::Unit::TestCase
     ss = %w[abc defg h ijk l mno pqr st u vw xy z]
     assert_equal([%w[abc defg h], %w[ijk l], %w[mno], %w[pqr st u vw xy z]],
                  ss.slice_before(/\A...\z/).to_a)
+    assert_not_warn{ss.slice_before(/\A...\z/).to_a}
   end
 
 end

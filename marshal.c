@@ -210,7 +210,7 @@ class2path(VALUE klass)
     VALUE path = rb_class_path(klass);
     const char *n;
 
-    n = must_not_be_anonymous((TYPE(klass) == T_CLASS ? "class" : "module"), path);
+    n = must_not_be_anonymous((RB_TYPE_P(klass, T_CLASS) ? "class" : "module"), path);
     if (rb_path_to_class(path) != rb_class_real(klass)) {
 	rb_raise(rb_eTypeError, "%s can't be referred to", n);
     }
@@ -506,8 +506,12 @@ w_uclass(VALUE obj, VALUE super, struct dump_arg *arg)
 }
 
 static int
-w_obj_each(ID id, VALUE value, struct dump_call_arg *arg)
+w_obj_each(st_data_t key, st_data_t val, st_data_t a)
 {
+    ID id = (ID)key;
+    VALUE value = (VALUE)val;
+    struct dump_call_arg *arg = (struct dump_call_arg *)a;
+
     if (id == rb_id_encoding()) return ST_CONTINUE;
     if (id == rb_intern("E")) return ST_CONTINUE;
     w_symbol(id, arg->arg);
@@ -656,7 +660,7 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 
 	    v = rb_funcall(obj, s_dump, 1, INT2NUM(limit));
 	    check_dump_arg(arg, s_dump);
-	    if (TYPE(v) != T_STRING) {
+	    if (!RB_TYPE_P(v, T_STRING)) {
 		rb_raise(rb_eTypeError, "_dump() must return string");
 	    }
 	    hasiv = has_ivars(obj, ivtbl);
@@ -824,7 +828,7 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 
 		if (!rb_respond_to(obj, s_dump_data)) {
 		    rb_raise(rb_eTypeError,
-			     "no marshal_dump is defined for class %s",
+			     "no _dump_data is defined for class %s",
 			     rb_obj_classname(obj));
 		}
 		v = rb_funcall(obj, s_dump_data, 0);
@@ -1021,7 +1025,7 @@ r_byte(struct load_arg *arg)
 {
     int c;
 
-    if (TYPE(arg->src) == T_STRING) {
+    if (RB_TYPE_P(arg->src, T_STRING)) {
 	if (RSTRING_LEN(arg->src) > arg->offset) {
 	    c = (unsigned char)RSTRING_PTR(arg->src)[arg->offset++];
 	}
@@ -1095,7 +1099,7 @@ r_bytes0(long len, struct load_arg *arg)
     VALUE str;
 
     if (len == 0) return rb_str_new(0, 0);
-    if (TYPE(arg->src) == T_STRING) {
+    if (RB_TYPE_P(arg->src, T_STRING)) {
 	if (RSTRING_LEN(arg->src) - arg->offset >= len) {
 	    str = rb_str_new(RSTRING_PTR(arg->src)+arg->offset, len);
 	    arg->offset += len;
@@ -1139,16 +1143,16 @@ r_symlink(struct load_arg *arg)
     st_data_t id;
     long num = r_long(arg);
 
-    if (st_lookup(arg->symbols, num, &id)) {
-	return (ID)id;
+    if (!st_lookup(arg->symbols, num, &id)) {
+	rb_raise(rb_eArgError, "bad symbol");
     }
-    rb_raise(rb_eArgError, "bad symbol");
+    return (ID)id;
 }
 
 static ID
 r_symreal(struct load_arg *arg, int ivar)
 {
-    volatile VALUE s = r_bytes(arg);
+    VALUE s = r_bytes(arg);
     ID id;
     int idx = -1;
     st_index_t n = arg->symbols->num_entries;
@@ -1161,8 +1165,7 @@ r_symreal(struct load_arg *arg, int ivar)
 	    idx = id2encidx(id, r_object(arg));
 	}
     }
-    if (idx < 0) idx = rb_usascii_encindex();
-    rb_enc_associate_index(s, idx);
+    if (idx > 0) rb_enc_associate_index(s, idx);
     id = rb_intern_str(s);
     st_insert(arg->symbols, (st_data_t)n, (st_data_t)id);
 
@@ -1176,6 +1179,8 @@ r_symbol(struct load_arg *arg)
 
   again:
     switch ((type = r_byte(arg))) {
+      default:
+	rb_raise(rb_eArgError, "dump format error for symbol(0x%x)", type);
       case TYPE_IVAR:
 	ivar = 1;
 	goto again;
@@ -1186,9 +1191,6 @@ r_symbol(struct load_arg *arg)
 	    rb_raise(rb_eArgError, "dump format error (symlink with encoding)");
 	}
 	return r_symlink(arg);
-      default:
-	rb_raise(rb_eArgError, "dump format error for symbol(0x%x)", type);
-	break;
     }
 }
 
@@ -1271,7 +1273,7 @@ path2class(VALUE path)
 {
     VALUE v = rb_path_to_class(path);
 
-    if (TYPE(v) != T_CLASS) {
+    if (!RB_TYPE_P(v, T_CLASS)) {
 	rb_raise(rb_eArgError, "%.*s does not refer to class",
 		 (int)RSTRING_LEN(path), RSTRING_PTR(path));
     }
@@ -1283,7 +1285,7 @@ path2module(VALUE path)
 {
     VALUE v = rb_path_to_class(path);
 
-    if (TYPE(v) != T_MODULE) {
+    if (!RB_TYPE_P(v, T_MODULE)) {
 	rb_raise(rb_eArgError, "%.*s does not refer to module",
 		 (int)RSTRING_LEN(path), RSTRING_PTR(path));
     }
@@ -1291,24 +1293,39 @@ path2module(VALUE path)
 }
 
 static VALUE
-obj_alloc_by_path(VALUE path, struct load_arg *arg)
+obj_alloc_by_klass(VALUE klass, struct load_arg *arg, VALUE *oldclass)
 {
-    VALUE klass;
     st_data_t data;
     rb_alloc_func_t allocator;
-
-    klass = path2class(path);
 
     allocator = rb_get_alloc_func(klass);
     if (st_lookup(compat_allocator_tbl, (st_data_t)allocator, &data)) {
         marshal_compat_t *compat = (marshal_compat_t*)data;
         VALUE real_obj = rb_obj_alloc(klass);
         VALUE obj = rb_obj_alloc(compat->oldclass);
+	if (oldclass) *oldclass = compat->oldclass;
         st_insert(arg->compat_tbl, (st_data_t)obj, (st_data_t)real_obj);
         return obj;
     }
 
     return rb_obj_alloc(klass);
+}
+
+static VALUE
+obj_alloc_by_path(VALUE path, struct load_arg *arg)
+{
+    return obj_alloc_by_klass(path2class(path), arg, 0);
+}
+
+static VALUE
+append_extmod(VALUE obj, VALUE extmod)
+{
+    long i = RARRAY_LEN(extmod);
+    while (i > 0) {
+	VALUE m = RARRAY_PTR(extmod)[--i];
+	rb_extend_object(obj, m);
+    }
+    return obj;
 }
 
 static VALUE
@@ -1345,7 +1362,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	{
 	    VALUE m = path2module(r_unique(arg));
 
-            if (NIL_P(extmod)) extmod = rb_ary_new2(0);
+            if (NIL_P(extmod)) extmod = rb_ary_tmp_new(0);
             rb_ary_push(extmod, m);
 
 	    v = r_object0(arg, 0, extmod);
@@ -1364,11 +1381,11 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 		rb_raise(rb_eTypeError, "singleton can't be loaded");
 	    }
 	    v = r_object0(arg, 0, extmod);
-	    if (rb_special_const_p(v) || TYPE(v) == T_OBJECT || TYPE(v) == T_CLASS) {
+	    if (rb_special_const_p(v) || RB_TYPE_P(v, T_OBJECT) || RB_TYPE_P(v, T_CLASS)) {
 	      format_error:
 		rb_raise(rb_eArgError, "dump format error (user class)");
 	    }
-	    if (TYPE(v) == T_MODULE || !RTEST(rb_class_inherited_p(c, RBASIC(v)->klass))) {
+	    if (RB_TYPE_P(v, T_MODULE) || !RTEST(rb_class_inherited_p(c, RBASIC(v)->klass))) {
 		VALUE tmp = rb_obj_alloc(c);
 
 		if (TYPE(v) != TYPE(tmp)) goto format_error;
@@ -1554,7 +1571,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    long len = r_long(arg);
 
             v = rb_obj_alloc(klass);
-	    if (TYPE(v) != T_STRUCT) {
+	    if (!RB_TYPE_P(v, T_STRUCT)) {
 		rb_raise(rb_eTypeError, "class %s not a struct", rb_class2name(klass));
 	    }
 	    mem = rb_struct_s_members(klass);
@@ -1605,14 +1622,13 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
       case TYPE_USRMARSHAL:
         {
 	    VALUE klass = path2class(r_unique(arg));
+	    VALUE oldclass = 0;
 	    VALUE data;
 
-	    v = rb_obj_alloc(klass);
+	    v = obj_alloc_by_klass(klass, arg, &oldclass);
             if (!NIL_P(extmod)) {
-                while (RARRAY_LEN(extmod) > 0) {
-                    VALUE m = rb_ary_pop(extmod);
-                    rb_extend_object(v, m);
-                }
+		/* for the case marshal_load is overridden */
+		append_extmod(v, extmod);
             }
 	    if (!rb_respond_to(v, s_mload)) {
 		rb_raise(rb_eTypeError, "instance of %s needs to have method `marshal_load'",
@@ -1623,6 +1639,10 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    rb_funcall(v, s_mload, 1, data);
 	    check_load_arg(arg, s_mload);
             v = r_leave(v, arg);
+	    if (!NIL_P(extmod)) {
+		if (oldclass) append_extmod(v, extmod);
+		rb_ary_clear(extmod);
+	    }
 	}
         break;
 
@@ -1630,7 +1650,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	{
 	    st_index_t idx = r_prepare(arg);
             v = obj_alloc_by_path(r_unique(arg), arg);
-	    if (TYPE(v) != T_OBJECT) {
+	    if (!RB_TYPE_P(v, T_OBJECT)) {
 		rb_raise(rb_eArgError, "dump format error");
 	    }
 	    v = r_entry0(v, idx, arg);
@@ -1640,34 +1660,25 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	break;
 
       case TYPE_DATA:
-       {
-           VALUE klass = path2class(r_unique(arg));
-           if (rb_respond_to(klass, s_alloc)) {
-	       static int warn = TRUE;
-	       if (warn) {
-		   rb_warn("define `allocate' instead of `_alloc'");
-		   warn = FALSE;
-	       }
-	       v = rb_funcall(klass, s_alloc, 0);
-	       check_load_arg(arg, s_alloc);
-           }
-	   else {
-	       v = rb_obj_alloc(klass);
-	   }
-           if (TYPE(v) != T_DATA) {
-               rb_raise(rb_eArgError, "dump format error");
-           }
-           v = r_entry(v, arg);
-           if (!rb_respond_to(v, s_load_data)) {
-               rb_raise(rb_eTypeError,
-                        "class %s needs to have instance method `_load_data'",
-                        rb_class2name(klass));
-           }
-           rb_funcall(v, s_load_data, 1, r_object0(arg, 0, extmod));
-	   check_load_arg(arg, s_load_data);
-           v = r_leave(v, arg);
-       }
-       break;
+	{
+	    VALUE klass = path2class(r_unique(arg));
+	    VALUE oldclass = 0;
+
+	    v = obj_alloc_by_klass(klass, arg, &oldclass);
+	    if (!RB_TYPE_P(v, T_DATA)) {
+		rb_raise(rb_eArgError, "dump format error");
+	    }
+	    v = r_entry(v, arg);
+	    if (!rb_respond_to(v, s_load_data)) {
+		rb_raise(rb_eTypeError,
+			 "class %s needs to have instance method `_load_data'",
+			 rb_class2name(klass));
+	    }
+	    rb_funcall(v, s_load_data, 1, r_object0(arg, 0, extmod));
+	    check_load_arg(arg, s_load_data);
+	    v = r_leave(v, arg);
+	}
+	break;
 
       case TYPE_MODULE_OLD:
         {

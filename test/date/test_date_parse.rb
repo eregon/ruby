@@ -656,6 +656,9 @@ class TestDateParse < Test::Unit::TestCase
       Date.parse('')
     end
     assert_raise(ArgumentError) do
+      DateTime.parse('')
+    end
+    assert_raise(ArgumentError) do
       Date.parse('2001-02-29')
     end
     assert_raise(ArgumentError) do
@@ -1055,6 +1058,40 @@ class TestDateParse < Test::Unit::TestCase
     d = DateTime.jisx0301('H13.02.03T04:05:06+07:00', Date::ITALY + 10)
     assert_equal(DateTime.new(2001,2,3,4,5,6,'+07:00'), d)
     assert_equal(Date::ITALY + 10, d.start)
+  end
+
+  def test_given_string
+    s = '2001-02-03T04:05:06Z'
+    s0 = s.dup
+
+    assert_not_equal({}, Date._parse(s))
+    assert_equal(s0, s)
+
+    assert_not_equal({}, Date._iso8601(s))
+    assert_equal(s0, s)
+
+    assert_not_equal({}, Date._rfc3339(s))
+    assert_equal(s0, s)
+
+    assert_not_equal({}, Date._xmlschema(s))
+    assert_equal(s0, s)
+
+    s = 'Sat, 3 Feb 2001 04:05:06 UT'
+    s0 = s.dup
+    assert_not_equal({}, Date._rfc2822(s))
+    assert_equal(s0, s)
+    assert_not_equal({}, Date._rfc822(s))
+    assert_equal(s0, s)
+
+    s = 'Sat, 03 Feb 2001 04:05:06 GMT'
+    s0 = s.dup
+    assert_not_equal({}, Date._httpdate(s))
+    assert_equal(s0, s)
+
+    s = 'H13.02.03T04:05:06,07Z'
+    s0 = s.dup
+    assert_not_equal({}, Date._jisx0301(s))
+    assert_equal(s0, s)
   end
 
 end

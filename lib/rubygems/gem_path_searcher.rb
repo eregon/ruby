@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems"
 require "rubygems/deprecate"
 
@@ -166,7 +160,7 @@ class Gem::GemPathSearcher
       spec.require_paths
   end
 
-  extend Deprecate
+  extend Gem::Deprecate
 
   deprecate :initialize,              :none,  2011, 10
   deprecate :find,                    :none,  2011, 10

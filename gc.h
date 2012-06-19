@@ -2,9 +2,9 @@
 #ifndef RUBY_GC_H
 #define RUBY_GC_H 1
 
-#if defined(__x86_64__) && defined(__GNUC__)
+#if defined(__x86_64__) && defined(__GNUC__) && !defined(__native_client__)
 #define SET_MACHINE_STACK_END(p) __asm__("movq\t%%rsp, %0" : "=r" (*(p)))
-#elif defined(__i386) && defined(__GNUC__)
+#elif defined(__i386) && defined(__GNUC__) && !defined(__native_client__)
 #define SET_MACHINE_STACK_END(p) __asm__("movl\t%%esp, %0" : "=r" (*(p)))
 #else
 NOINLINE(void rb_gc_set_stack_end(VALUE **stack_end_p));
@@ -81,6 +81,7 @@ int ruby_get_stack_grow_direction(volatile VALUE *addr);
 #define STACK_GROW_DIR_DETECTION VALUE stack_grow_dir_detection
 #define STACK_DIR_UPPER(a,b) STACK_UPPER(&stack_grow_dir_detection, (a), (b))
 #endif
+#define IS_STACK_DIR_UPPER() STACK_DIR_UPPER(1,0)
 
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility push(default)

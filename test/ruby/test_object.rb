@@ -181,17 +181,42 @@ class TestObject < Test::Unit::TestCase
     o = Object.new
     def o.to_s; 1; end
     assert_raise(TypeError) { String(o) }
+    def o.to_s; "o"; end
+    assert_equal("o", String(o))
+    def o.respond_to?(*) false; end
+    assert_raise(TypeError) { String(o) }
   end
 
   def test_check_convert_type
     o = Object.new
     def o.to_a; 1; end
     assert_raise(TypeError) { Array(o) }
+    def o.to_a; [1]; end
+    assert_equal([1], Array(o))
+    def o.respond_to?(*) false; end
+    assert_equal([o], Array(o))
+  end
+
+  def test_convert_hash
+    assert_equal({}, Hash(nil))
+    assert_equal({}, Hash([]))
+    assert_equal({key: :value}, Hash(key: :value))
+    assert_raise(TypeError) { Hash([1,2]) }
+    assert_raise(TypeError) { Hash(Object.new) }
+    o = Object.new
+    def o.to_hash; {a: 1, b: 2}; end
+    assert_equal({a: 1, b: 2}, Hash(o))
+    def o.to_hash; 9; end
+    assert_raise(TypeError) { Hash(o) }
   end
 
   def test_to_integer
     o = Object.new
     def o.to_i; nil; end
+    assert_raise(TypeError) { Integer(o) }
+    def o.to_i; 42; end
+    assert_equal(42, Integer(o))
+    def o.respond_to?(*) false; end
     assert_raise(TypeError) { Integer(o) }
   end
 
@@ -334,16 +359,29 @@ class TestObject < Test::Unit::TestCase
     assert_nothing_raised(bug2494) {[b].flatten}
   end
 
+  def test_respond_to_missing_string
+    c = Class.new do
+      def respond_to_missing?(id, priv)
+        !(id !~ /\Agadzoks\d+\z/) ^ priv
+      end
+    end
+    foo = c.new
+    assert_equal(false, foo.respond_to?("gadzooks16"))
+    assert_equal(true, foo.respond_to?("gadzooks17", true))
+    assert_equal(true, foo.respond_to?("gadzoks16"))
+    assert_equal(false, foo.respond_to?("gadzoks17", true))
+  end
+
   def test_respond_to_missing
     c = Class.new do
-      def respond_to_missing?(id, priv=false)
+      def respond_to_missing?(id, priv)
         if id == :foobar
           true
         else
           false
         end
       end
-      def method_missing(id,*args)
+      def method_missing(id, *args)
         if id == :foobar
           return [:foo, *args]
         else
@@ -383,8 +421,134 @@ class TestObject < Test::Unit::TestCase
     end
   end
 
+  def test_implicit_respond_to
+    bug5158 = '[ruby-core:38799]'
+
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:to_ary) do
+        called << [:to_ary, bug5158]
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:to_ary, bug5158]], called, bug5158)
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |*a|
+        called << [:respond_to?, *a]
+        false
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:respond_to?, :to_ary, true]], called, bug5158)
+  end
+
+  def test_implicit_respond_to_arity_1
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |a|
+        called << [:respond_to?, a]
+        false
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:respond_to?, :to_ary]], called, '[bug:6000]')
+  end
+
+  def test_implicit_respond_to_arity_3
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |a, b, c|
+        called << [:respond_to?, a, b, c]
+        false
+      end
+    end
+
+    e = assert_raise(ArgumentError, '[bug:6000]') do
+      [[p]].flatten
+    end
+
+    assert_equal('respond_to? must accept 1 or 2 arguments (requires 3)', e.message)
+  end
+
+  def test_method_missing_passed_block
+    bug5731 = '[ruby-dev:44961]'
+
+    c = Class.new do
+      def method_missing(meth, *args) yield(meth, *args) end
+    end
+    a = c.new
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      a.foo {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+    result = nil
+    e = a.enum_for(:foo)
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      e.each {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+
+    c = Class.new do
+      def respond_to_missing?(id, priv)
+        true
+      end
+      def method_missing(id, *args, &block)
+        return block.call(:foo, *args)
+      end
+    end
+    foo = c.new
+
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      foo.foobar {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      foo.enum_for(:foobar).each {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+
+    result = nil
+    foobar = foo.method(:foobar)
+    foobar.call {|x| result = x}
+    assert_equal(:foo, result, bug5731)
+
+    result = nil
+    foobar = foo.method(:foobar)
+    foobar.enum_for(:call).each {|x| result = x}
+    assert_equal(:foo, result, bug5731)
+  end
+
   def test_send_with_no_arguments
     assert_raise(ArgumentError) { 1.send }
+  end
+
+  def test_send_with_block
+    x = :ng
+    1.send(:times) { x = :ok }
+    assert_equal(:ok, x)
+
+    x = :ok
+    o = Object.new
+    def o.inspect
+      yield if block_given?
+      super
+    end
+    begin
+      nil.public_send(o) { x = :ng }
+    rescue
+    end
+    assert_equal(:ok, x)
   end
 
   def test_no_superclass_method
@@ -581,5 +745,55 @@ class TestObject < Test::Unit::TestCase
     assert_raise(TypeError) do
       :foo.singleton_class
     end
+  end
+
+  def test_redef_method_missing
+    bug5473 = '[ruby-core:40287]'
+    ['ArgumentError.new("bug5473")', 'ArgumentError, "bug5473"', '"bug5473"'].each do |code|
+      out, err, status = EnvUtil.invoke_ruby([], <<-SRC, true, true)
+      class ::Object
+        def method_missing(m, *a, &b)
+          raise #{code}
+        end
+      end
+
+      p((1.foo rescue $!))
+      SRC
+      assert_send([status, :success?], bug5473)
+      assert_equal("", err, bug5473)
+      assert_equal((eval("raise #{code}") rescue $!.inspect), out.chomp, bug5473)
+    end
+  end
+
+  def assert_not_initialize_copy
+    a = yield
+    b = yield
+    assert_nothing_raised("copy") {a.instance_eval {initialize_copy(b)}}
+    c = a.dup.freeze
+    assert_raise(RuntimeError, "frozen") {c.instance_eval {initialize_copy(b)}}
+    d = a.dup.trust
+    assert_raise(SecurityError, "untrust") do
+      proc {
+        $SAFE = 4
+        d.instance_eval {initialize_copy(b)}
+      }.call
+    end
+    [a, b, c, d]
+  end
+
+  def test_bad_initialize_copy
+    assert_not_initialize_copy {Object.new}
+    assert_not_initialize_copy {[].to_enum}
+    assert_not_initialize_copy {Enumerator::Generator.new {}}
+    assert_not_initialize_copy {Enumerator::Yielder.new {}}
+    assert_not_initialize_copy {File.stat(__FILE__)}
+    assert_not_initialize_copy {open(__FILE__)}.each(&:close)
+    assert_not_initialize_copy {ARGF.class.new}
+    assert_not_initialize_copy {Random.new}
+    assert_not_initialize_copy {//}
+    assert_not_initialize_copy {/.*/.match("foo")}
+    st = Struct.new(:foo)
+    assert_not_initialize_copy {st.new}
+    assert_not_initialize_copy {Time.now}
   end
 end

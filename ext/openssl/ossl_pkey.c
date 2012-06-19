@@ -33,6 +33,42 @@ ossl_generate_cb(int p, int n, void *arg)
     rb_yield(ary);
 }
 
+#if HAVE_BN_GENCB
+/* OpenSSL 2nd version of GN generation callback */
+int
+ossl_generate_cb_2(int p, int n, BN_GENCB *cb)
+{
+    VALUE ary;
+    struct ossl_generate_cb_arg *arg;
+    int state;
+
+    arg = (struct ossl_generate_cb_arg *)cb->arg;
+    if (arg->yield) {
+	ary = rb_ary_new2(2);
+	rb_ary_store(ary, 0, INT2NUM(p));
+	rb_ary_store(ary, 1, INT2NUM(n));
+
+	/*
+	* can be break by raising exception or 'break'
+	*/
+	rb_protect(rb_yield, ary, &state);
+	if (state) {
+	    arg->stop = 1;
+	    arg->state = state;
+	}
+    }
+    if (arg->stop) return 0;
+    return 1;
+}
+
+void
+ossl_generate_cb_stop(void *ptr)
+{
+    struct ossl_generate_cb_arg *arg = (struct ossl_generate_cb_arg *)ptr;
+    arg->stop = 1;
+}
+#endif
+
 /*
  * Public
  */
@@ -62,7 +98,8 @@ ossl_pkey_new(EVP_PKEY *pkey)
     default:
 	ossl_raise(ePKeyError, "unsupported key type");
     }
-    return Qnil; /* not reached */
+
+    UNREACHABLE;
 }
 
 VALUE
@@ -75,6 +112,7 @@ ossl_pkey_new_from_file(VALUE filename)
     if (!(fp = fopen(RSTRING_PTR(filename), "r"))) {
 	ossl_raise(ePKeyError, "%s", strerror(errno));
     }
+    rb_fd_fix_cloexec(fileno(fp));
 
     pkey = PEM_read_PrivateKey(fp, NULL, ossl_pem_passwd_cb, NULL);
     fclose(fp);
@@ -98,10 +136,9 @@ ossl_pkey_new_from_file(VALUE filename)
  * * +pwd+ is an optional password in case +string+ or +file+ is an encrypted
  * PEM resource.
  */
-static VALUE 
+static VALUE
 ossl_pkey_new_from_data(int argc, VALUE *argv, VALUE self)
 {
-     FILE *fp;
      EVP_PKEY *pkey;
      BIO *bio;
      VALUE data, pass;
@@ -370,11 +407,11 @@ Init_ossl_pkey()
     /* Document-class: OpenSSL::PKey::PKey
      *
      * An abstract class that bundles signature creation (PKey#sign) and
-     * validation (PKey#verify) that is common to all implementations:
+     * validation (PKey#verify) that is common to all implementations except
+     * OpenSSL::PKey::DH
      * * OpenSSL::PKey::RSA
      * * OpenSSL::PKey::DSA
      * * OpenSSL::PKey::EC
-     * * OpenSSL::PKey::DH
      */
     cPKey = rb_define_class_under(mPKey, "PKey", rb_cObject);
 

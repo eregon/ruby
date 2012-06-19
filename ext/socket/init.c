@@ -48,6 +48,7 @@ rsock_init_sock(VALUE sock, int fd)
 
     if (fstat(fd, &sbuf) < 0)
         rb_sys_fail(0);
+    rb_update_max_fd(fd);
     if (!S_ISSOCK(sbuf.st_mode))
         rb_raise(rb_eArgError, "not a socket file descriptor");
 #else
@@ -238,18 +239,52 @@ rsock_s_recvfrom_nonblock(VALUE sock, int argc, VALUE *argv, enum sock_recv_type
     return rb_assoc_new(str, addr);
 }
 
+static int
+rsock_socket0(int domain, int type, int proto)
+{
+    int ret;
+
+#ifdef SOCK_CLOEXEC
+    static int try_sock_cloexec = 1;
+    if (try_sock_cloexec) {
+        ret = socket(domain, type|SOCK_CLOEXEC, proto);
+        if (ret == -1 && errno == EINVAL) {
+            /* SOCK_CLOEXEC is available since Linux 2.6.27.  Linux 2.6.18 fails with EINVAL */
+            ret = socket(domain, type, proto);
+            if (ret != -1) {
+                try_sock_cloexec = 0;
+            }
+        }
+    }
+    else {
+        ret = socket(domain, type, proto);
+    }
+#else
+    ret = socket(domain, type, proto);
+#endif
+    if (ret == -1)
+        return -1;
+
+    rb_fd_fix_cloexec(ret);
+
+    return ret;
+
+}
+
 int
 rsock_socket(int domain, int type, int proto)
 {
     int fd;
 
-    fd = socket(domain, type, proto);
+    fd = rsock_socket0(domain, type, proto);
     if (fd < 0) {
-	if (errno == EMFILE || errno == ENFILE) {
-	    rb_gc();
-	    fd = socket(domain, type, proto);
-	}
+       if (errno == EMFILE || errno == ENFILE) {
+           rb_gc();
+           fd = rsock_socket0(domain, type, proto);
+       }
     }
+    if (0 <= fd)
+        rb_update_max_fd(fd);
     return fd;
 }
 
@@ -441,6 +476,37 @@ make_fd_nonblock(int fd)
     }
 }
 
+static int
+cloexec_accept(int socket, struct sockaddr *address, socklen_t *address_len)
+{
+    int ret;
+#ifdef HAVE_ACCEPT4
+    static int try_accept4 = 1;
+    if (try_accept4) {
+        ret = accept4(socket, address, address_len, SOCK_CLOEXEC);
+        /* accept4 is available since Linux 2.6.28, glibc 2.10. */
+        if (ret != -1) {
+            if (ret <= 2)
+                rb_maygvl_fd_fix_cloexec(ret);
+            return ret;
+        }
+        if (errno == ENOSYS) {
+            try_accept4 = 0;
+            ret = accept(socket, address, address_len);
+        }
+    }
+    else {
+        ret = accept(socket, address, address_len);
+    }
+#else
+    ret = accept(socket, address, address_len);
+#endif
+    if (ret == -1) return -1;
+    rb_maygvl_fd_fix_cloexec(ret);
+    return ret;
+}
+
+
 VALUE
 rsock_s_accept_nonblock(VALUE klass, rb_io_t *fptr, struct sockaddr *sockaddr, socklen_t *len)
 {
@@ -448,7 +514,7 @@ rsock_s_accept_nonblock(VALUE klass, rb_io_t *fptr, struct sockaddr *sockaddr, s
 
     rb_secure(3);
     rb_io_set_nonblock(fptr);
-    fd2 = accept(fptr->fd, (struct sockaddr*)sockaddr, len);
+    fd2 = cloexec_accept(fptr->fd, (struct sockaddr*)sockaddr, len);
     if (fd2 < 0) {
 	switch (errno) {
 	  case EAGAIN:
@@ -463,6 +529,7 @@ rsock_s_accept_nonblock(VALUE klass, rb_io_t *fptr, struct sockaddr *sockaddr, s
 	}
         rb_sys_fail("accept(2)");
     }
+    rb_update_max_fd(fd2);
     make_fd_nonblock(fd2);
     return rsock_init_sock(rb_obj_alloc(klass), fd2);
 }
@@ -477,7 +544,7 @@ static VALUE
 accept_blocking(void *data)
 {
     struct accept_arg *arg = data;
-    return (VALUE)accept(arg->fd, arg->sockaddr, arg->len);
+    return (VALUE)cloexec_accept(arg->fd, arg->sockaddr, arg->len);
 }
 
 VALUE
@@ -509,6 +576,7 @@ rsock_s_accept(VALUE klass, int fd, struct sockaddr *sockaddr, socklen_t *len)
 	}
 	rb_sys_fail(0);
     }
+    rb_update_max_fd(fd2);
     if (!klass) return INT2NUM(fd2);
     return rsock_init_sock(rb_obj_alloc(klass), fd2);
 }
@@ -526,12 +594,12 @@ rsock_getfamily(int sockfd)
     return ss.ss_family;
 }
 
-/*
- * SocketError is the error class for socket.
- */
 void
 rsock_init_socket_init()
 {
+    /*
+     * SocketError is the error class for socket.
+     */
     rb_eSocket = rb_define_class("SocketError", rb_eStandardError);
     rsock_init_ipsocket();
     rsock_init_tcpsocket();

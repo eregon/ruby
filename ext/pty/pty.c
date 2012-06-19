@@ -32,6 +32,7 @@
 #include "ruby/ruby.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
+#include "internal.h"
 
 #include <signal.h>
 #ifdef HAVE_SYS_STROPTS_H
@@ -43,70 +44,6 @@
 #endif
 
 #define	DEVICELEN	16
-
-#if !defined(HAVE_OPENPTY)
-#if defined(__hpux)
-static const
-char	MasterDevice[] = "/dev/ptym/pty%s",
-	SlaveDevice[] =  "/dev/pty/tty%s",
-	*const deviceNo[] = {
-		"p0","p1","p2","p3","p4","p5","p6","p7",
-		"p8","p9","pa","pb","pc","pd","pe","pf",
-		"q0","q1","q2","q3","q4","q5","q6","q7",
-		"q8","q9","qa","qb","qc","qd","qe","qf",
-		"r0","r1","r2","r3","r4","r5","r6","r7",
-		"r8","r9","ra","rb","rc","rd","re","rf",
-		"s0","s1","s2","s3","s4","s5","s6","s7",
-		"s8","s9","sa","sb","sc","sd","se","sf",
-		"t0","t1","t2","t3","t4","t5","t6","t7",
-		"t8","t9","ta","tb","tc","td","te","tf",
-		"u0","u1","u2","u3","u4","u5","u6","u7",
-		"u8","u9","ua","ub","uc","ud","ue","uf",
-		"v0","v1","v2","v3","v4","v5","v6","v7",
-		"v8","v9","va","vb","vc","vd","ve","vf",
-		"w0","w1","w2","w3","w4","w5","w6","w7",
-		"w8","w9","wa","wb","wc","wd","we","wf",
-		0,
-	};
-#elif defined(_IBMESA)  /* AIX/ESA */
-static const
-char	MasterDevice[] = "/dev/ptyp%s",
-  	SlaveDevice[] = "/dev/ttyp%s",
-	*const deviceNo[] = {
-"00","01","02","03","04","05","06","07","08","09","0a","0b","0c","0d","0e","0f",
-"10","11","12","13","14","15","16","17","18","19","1a","1b","1c","1d","1e","1f",
-"20","21","22","23","24","25","26","27","28","29","2a","2b","2c","2d","2e","2f",
-"30","31","32","33","34","35","36","37","38","39","3a","3b","3c","3d","3e","3f",
-"40","41","42","43","44","45","46","47","48","49","4a","4b","4c","4d","4e","4f",
-"50","51","52","53","54","55","56","57","58","59","5a","5b","5c","5d","5e","5f",
-"60","61","62","63","64","65","66","67","68","69","6a","6b","6c","6d","6e","6f",
-"70","71","72","73","74","75","76","77","78","79","7a","7b","7c","7d","7e","7f",
-"80","81","82","83","84","85","86","87","88","89","8a","8b","8c","8d","8e","8f",
-"90","91","92","93","94","95","96","97","98","99","9a","9b","9c","9d","9e","9f",
-"a0","a1","a2","a3","a4","a5","a6","a7","a8","a9","aa","ab","ac","ad","ae","af",
-"b0","b1","b2","b3","b4","b5","b6","b7","b8","b9","ba","bb","bc","bd","be","bf",
-"c0","c1","c2","c3","c4","c5","c6","c7","c8","c9","ca","cb","cc","cd","ce","cf",
-"d0","d1","d2","d3","d4","d5","d6","d7","d8","d9","da","db","dc","dd","de","df",
-"e0","e1","e2","e3","e4","e5","e6","e7","e8","e9","ea","eb","ec","ed","ee","ef",
-"f0","f1","f2","f3","f4","f5","f6","f7","f8","f9","fa","fb","fc","fd","fe","ff",
-		};
-#elif !defined(HAVE_PTSNAME)
-static const
-char	MasterDevice[] = "/dev/pty%s",
-	SlaveDevice[] = "/dev/tty%s",
-	*const deviceNo[] = {
-		"p0","p1","p2","p3","p4","p5","p6","p7",
-		"p8","p9","pa","pb","pc","pd","pe","pf",
-		"q0","q1","q2","q3","q4","q5","q6","q7",
-		"q8","q9","qa","qb","qc","qd","qe","qf",
-		"r0","r1","r2","r3","r4","r5","r6","r7",
-		"r8","r9","ra","rb","rc","rd","re","rf",
-		"s0","s1","s2","s3","s4","s5","s6","s7",
-		"s8","s9","sa","sb","sc","sd","se","sf",
-		0,
-	};
-#endif
-#endif /* !defined(HAVE_OPENPTY) */
 
 #ifndef HAVE_SETEUID
 # ifdef HAVE_SETREUID
@@ -141,8 +78,7 @@ static void getDevice(int*, int*, char [DEVICELEN], int);
 struct child_info {
     int master, slave;
     char *slavename;
-    int argc;
-    VALUE *argv;
+    struct rb_exec_arg earg;
 };
 
 static int
@@ -151,15 +87,11 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     struct child_info *carg = data;
     int master = carg->master;
     int slave = carg->slave;
-    int argc = carg->argc;
-    VALUE *argv = carg->argv;
 
 #define ERROR_EXIT(str) do { \
 	strlcpy(errbuf, (str), errbuf_len); \
 	return -1; \
     } while (0)
-
-    rb_thread_atfork_before_exec();
 
     /*
      * Set free from process group and controlling terminal
@@ -175,8 +107,9 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     if (setpgrp(0, getpid()) == -1)
         ERROR_EXIT("setpgrp()");
     {
-        int i = open("/dev/tty", O_RDONLY);
+        int i = rb_cloexec_open("/dev/tty", O_RDONLY, 0);
         if (i < 0) ERROR_EXIT("/dev/tty");
+        rb_update_max_fd(i);
         if (ioctl(i, TIOCNOTTY, (char *)0))
             ERROR_EXIT("ioctl(TIOCNOTTY)");
         close(i);
@@ -194,10 +127,11 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     /* errors ignored for sun */
 #else
     close(slave);
-    slave = open(carg->slavename, O_RDWR);
+    slave = rb_cloexec_open(carg->slavename, O_RDWR, 0);
     if (slave < 0) {
         ERROR_EXIT("open: pty slave");
     }
+    rb_update_max_fd(slave);
     close(master);
 #endif
     dup2(slave,0);
@@ -208,8 +142,7 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     seteuid(getuid());
 #endif
 
-    rb_f_exec(argc, argv);
-    return 0;
+    return rb_exec_async_signal_safe(&carg->earg, errbuf, sizeof(errbuf_len));
 #undef ERROR_EXIT
 }
 
@@ -217,7 +150,7 @@ static void
 establishShell(int argc, VALUE *argv, struct pty_info *info,
 	       char SlaveName[DEVICELEN])
 {
-    int 		master,slave;
+    int 		master, slave, status = 0;
     rb_pid_t		pid;
     char		*p, *getenv();
     struct passwd	*pwent;
@@ -243,21 +176,23 @@ establishShell(int argc, VALUE *argv, struct pty_info *info,
 	argv = &v;
     }
 
+    rb_execarg_init(argc, argv, 1, &carg.earg);
+    rb_execarg_fixup(&carg.earg);
+
     getDevice(&master, &slave, SlaveName, 0);
 
     carg.master = master;
     carg.slave = slave;
     carg.slavename = SlaveName;
-    carg.argc = argc;
-    carg.argv = argv;
     errbuf[0] = '\0';
-    pid = rb_fork_err(0, chfunc, &carg, Qnil, errbuf, sizeof(errbuf));
+    pid = rb_fork_async_signal_safe(&status, chfunc, &carg, Qnil, errbuf, sizeof(errbuf));
 
     if (pid < 0) {
 	int e = errno;
 	close(master);
 	close(slave);
 	errno = e;
+	if (status) rb_jump_tag(status);
 	rb_sys_fail(errbuf[0] ? errbuf : "fork failed");
     }
 
@@ -280,24 +215,45 @@ static int
 get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, int fail)
 {
 #if defined(HAVE_POSIX_OPENPT)
+    /* Unix98 PTY */
     int masterfd = -1, slavefd = -1;
     char *slavedevice;
     struct sigaction dfl, old;
+    int flags;
 
     dfl.sa_handler = SIG_DFL;
     dfl.sa_flags = 0;
     sigemptyset(&dfl.sa_mask);
 
+#if defined(__sun) || defined(__FreeBSD__)
+    /* workaround for Solaris 10: grantpt() doesn't work if FD_CLOEXEC is set.  [ruby-dev:44688] */
+    /* FreeBSD 8 supported O_CLOEXEC for posix_openpt, but FreeBSD 9 removed it.
+     * http://www.freebsd.org/cgi/query-pr.cgi?pr=162374 */
     if ((masterfd = posix_openpt(O_RDWR|O_NOCTTY)) == -1) goto error;
     if (sigaction(SIGCHLD, &dfl, &old) == -1) goto error;
     if (grantpt(masterfd) == -1) goto grantpt_error;
+    rb_fd_fix_cloexec(masterfd);
+#else
+    flags = O_RDWR|O_NOCTTY;
+# if defined(O_CLOEXEC)
+    /* glibc posix_openpt() in GNU/Linux calls open("/dev/ptmx", flags) internally.
+     * So version dependency on GNU/Linux is same as O_CLOEXEC with open().
+     * O_CLOEXEC is available since Linux 2.6.23.  Linux 2.6.18 silently ignore it. */
+    flags |= O_CLOEXEC;
+# endif
+    if ((masterfd = posix_openpt(flags)) == -1) goto error;
+    rb_fd_fix_cloexec(masterfd);
+    if (sigaction(SIGCHLD, &dfl, &old) == -1) goto error;
+    if (grantpt(masterfd) == -1) goto grantpt_error;
+#endif
     if (sigaction(SIGCHLD, &old, NULL) == -1) goto error;
     if (unlockpt(masterfd) == -1) goto error;
     if ((slavedevice = ptsname(masterfd)) == NULL) goto error;
     if (no_mesg(slavedevice, nomesg) == -1) goto error;
-    if ((slavefd = open(slavedevice, O_RDWR|O_NOCTTY, 0)) == -1) goto error;
+    if ((slavefd = rb_cloexec_open(slavedevice, O_RDWR|O_NOCTTY, 0)) == -1) goto error;
+    rb_update_max_fd(slavefd);
 
-#if defined I_PUSH && !defined linux
+#if defined(I_PUSH) && !defined(__linux__)
     if (ioctl(slavefd, I_PUSH, "ptem") == -1) goto error;
     if (ioctl(slavefd, I_PUSH, "ldterm") == -1) goto error;
     if (ioctl(slavefd, I_PUSH, "ttcompat") == -1) goto error;
@@ -327,6 +283,8 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, 
 	if (!fail) return -1;
 	rb_raise(rb_eRuntimeError, "openpty() failed");
     }
+    rb_fd_fix_cloexec(*master);
+    rb_fd_fix_cloexec(*slave);
     if (no_mesg(SlaveName, nomesg) == -1) {
 	if (!fail) return -1;
 	rb_raise(rb_eRuntimeError, "can't chmod slave pty");
@@ -335,6 +293,7 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, 
     return 0;
 
 #elif defined HAVE__GETPTY
+    /* SGI IRIX */
     char *name;
     mode_t mode = nomesg ? 0600 : 0622;
 
@@ -342,12 +301,16 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, 
 	if (!fail) return -1;
 	rb_raise(rb_eRuntimeError, "_getpty() failed");
     }
+    rb_fd_fix_cloexec(*master);
 
-    *slave = open(name, O_RDWR);
+    *slave = rb_cloexec_open(name, O_RDWR, 0);
+    /* error check? */
+    rb_update_max_fd(*slave);
     strlcpy(SlaveName, name, DEVICELEN);
 
     return 0;
 #elif defined(HAVE_PTSNAME)
+    /* System V */
     int	 masterfd = -1, slavefd = -1;
     char *slavedevice;
     void (*s)();
@@ -356,15 +319,25 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, 
     extern int unlockpt(int);
     extern int grantpt(int);
 
+#if defined(__sun)
+    /* workaround for Solaris 10: grantpt() doesn't work if FD_CLOEXEC is set.  [ruby-dev:44688] */
     if((masterfd = open("/dev/ptmx", O_RDWR, 0)) == -1) goto error;
     s = signal(SIGCHLD, SIG_DFL);
     if(grantpt(masterfd) == -1) goto error;
+    rb_fd_fix_cloexec(masterfd);
+#else
+    if((masterfd = rb_cloexec_open("/dev/ptmx", O_RDWR, 0)) == -1) goto error;
+    rb_update_max_fd(masterfd);
+    s = signal(SIGCHLD, SIG_DFL);
+    if(grantpt(masterfd) == -1) goto error;
+#endif
     signal(SIGCHLD, s);
     if(unlockpt(masterfd) == -1) goto error;
     if((slavedevice = ptsname(masterfd)) == NULL) goto error;
     if (no_mesg(slavedevice, nomesg) == -1) goto error;
-    if((slavefd = open(slavedevice, O_RDWR, 0)) == -1) goto error;
-#if defined I_PUSH && !defined linux
+    if((slavefd = rb_cloexec_open(slavedevice, O_RDWR, 0)) == -1) goto error;
+    rb_update_max_fd(slavefd);
+#if defined(I_PUSH) && !defined(__linux__)
     if(ioctl(slavefd, I_PUSH, "ptem") == -1) goto error;
     if(ioctl(slavefd, I_PUSH, "ldterm") == -1) goto error;
     ioctl(slavefd, I_PUSH, "ttcompat");
@@ -380,16 +353,78 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int nomesg, 
     if (fail) rb_raise(rb_eRuntimeError, "can't get Master/Slave device");
     return -1;
 #else
+    /* BSD */
     int	 masterfd = -1, slavefd = -1;
     const char *const *p;
     char MasterName[DEVICELEN];
 
+#if defined(__hpux)
+    static const char MasterDevice[] = "/dev/ptym/pty%s";
+    static const char SlaveDevice[] =  "/dev/pty/tty%s";
+    static const char *const deviceNo[] = {
+    "p0","p1","p2","p3","p4","p5","p6","p7",
+    "p8","p9","pa","pb","pc","pd","pe","pf",
+    "q0","q1","q2","q3","q4","q5","q6","q7",
+    "q8","q9","qa","qb","qc","qd","qe","qf",
+    "r0","r1","r2","r3","r4","r5","r6","r7",
+    "r8","r9","ra","rb","rc","rd","re","rf",
+    "s0","s1","s2","s3","s4","s5","s6","s7",
+    "s8","s9","sa","sb","sc","sd","se","sf",
+    "t0","t1","t2","t3","t4","t5","t6","t7",
+    "t8","t9","ta","tb","tc","td","te","tf",
+    "u0","u1","u2","u3","u4","u5","u6","u7",
+    "u8","u9","ua","ub","uc","ud","ue","uf",
+    "v0","v1","v2","v3","v4","v5","v6","v7",
+    "v8","v9","va","vb","vc","vd","ve","vf",
+    "w0","w1","w2","w3","w4","w5","w6","w7",
+    "w8","w9","wa","wb","wc","wd","we","wf",
+    0
+    };
+#elif defined(_IBMESA)  /* AIX/ESA */
+    static const char MasterDevice[] = "/dev/ptyp%s";
+    static const char SlaveDevice[] = "/dev/ttyp%s";
+    static const char *const deviceNo[] = {
+    "00","01","02","03","04","05","06","07","08","09","0a","0b","0c","0d","0e","0f",
+    "10","11","12","13","14","15","16","17","18","19","1a","1b","1c","1d","1e","1f",
+    "20","21","22","23","24","25","26","27","28","29","2a","2b","2c","2d","2e","2f",
+    "30","31","32","33","34","35","36","37","38","39","3a","3b","3c","3d","3e","3f",
+    "40","41","42","43","44","45","46","47","48","49","4a","4b","4c","4d","4e","4f",
+    "50","51","52","53","54","55","56","57","58","59","5a","5b","5c","5d","5e","5f",
+    "60","61","62","63","64","65","66","67","68","69","6a","6b","6c","6d","6e","6f",
+    "70","71","72","73","74","75","76","77","78","79","7a","7b","7c","7d","7e","7f",
+    "80","81","82","83","84","85","86","87","88","89","8a","8b","8c","8d","8e","8f",
+    "90","91","92","93","94","95","96","97","98","99","9a","9b","9c","9d","9e","9f",
+    "a0","a1","a2","a3","a4","a5","a6","a7","a8","a9","aa","ab","ac","ad","ae","af",
+    "b0","b1","b2","b3","b4","b5","b6","b7","b8","b9","ba","bb","bc","bd","be","bf",
+    "c0","c1","c2","c3","c4","c5","c6","c7","c8","c9","ca","cb","cc","cd","ce","cf",
+    "d0","d1","d2","d3","d4","d5","d6","d7","d8","d9","da","db","dc","dd","de","df",
+    "e0","e1","e2","e3","e4","e5","e6","e7","e8","e9","ea","eb","ec","ed","ee","ef",
+    "f0","f1","f2","f3","f4","f5","f6","f7","f8","f9","fa","fb","fc","fd","fe","ff",
+    0
+    };
+#else /* 4.2BSD */
+    static const char MasterDevice[] = "/dev/pty%s";
+    static const char SlaveDevice[] = "/dev/tty%s";
+    static const char *const deviceNo[] = {
+    "p0","p1","p2","p3","p4","p5","p6","p7",
+    "p8","p9","pa","pb","pc","pd","pe","pf",
+    "q0","q1","q2","q3","q4","q5","q6","q7",
+    "q8","q9","qa","qb","qc","qd","qe","qf",
+    "r0","r1","r2","r3","r4","r5","r6","r7",
+    "r8","r9","ra","rb","rc","rd","re","rf",
+    "s0","s1","s2","s3","s4","s5","s6","s7",
+    "s8","s9","sa","sb","sc","sd","se","sf",
+    0
+    };
+#endif
     for (p = deviceNo; *p != NULL; p++) {
 	snprintf(MasterName, sizeof MasterName, MasterDevice, *p);
-	if ((masterfd = open(MasterName,O_RDWR,0)) >= 0) {
+	if ((masterfd = rb_cloexec_open(MasterName,O_RDWR,0)) >= 0) {
+            rb_update_max_fd(masterfd);
 	    *master = masterfd;
 	    snprintf(SlaveName, DEVICELEN, SlaveDevice, *p);
-	    if ((slavefd = open(SlaveName,O_RDWR,0)) >= 0) {
+	    if ((slavefd = rb_cloexec_open(SlaveName,O_RDWR,0)) >= 0) {
+                rb_update_max_fd(slavefd);
 		*slave = slavefd;
 		if (chown(SlaveName, getuid(), getgid()) != 0) goto error;
 		if (chmod(SlaveName, nomesg ? 0600 : 0622) != 0) goto error;
@@ -423,7 +458,7 @@ pty_close_pty(VALUE assoc)
 
     for (i = 0; i < 2; i++) {
         io = rb_ary_entry(assoc, i);
-        if (TYPE(io) == T_FILE && 0 <= RFILE(io)->fptr->fd)
+        if (RB_TYPE_P(io, T_FILE) && 0 <= RFILE(io)->fptr->fd)
             rb_io_close(io);
     }
     return Qnil;
@@ -574,9 +609,10 @@ pty_getpty(int argc, VALUE *argv, VALUE self)
     rfptr->pathv = rb_obj_freeze(rb_str_new_cstr(SlaveName));
 
     wfptr->mode = rb_io_mode_flags("w") | FMODE_SYNC;
-    wfptr->fd = dup(info.fd);
+    wfptr->fd = rb_cloexec_dup(info.fd);
     if (wfptr->fd == -1)
         rb_sys_fail("dup()");
+    rb_update_max_fd(wfptr->fd);
     wfptr->pathv = rfptr->pathv;
 
     res = rb_ary_new2(3);
@@ -591,6 +627,7 @@ pty_getpty(int argc, VALUE *argv, VALUE self)
     return res;
 }
 
+NORETURN(static void raise_from_check(pid_t pid, int status));
 static void
 raise_from_check(pid_t pid, int status)
 {
@@ -644,11 +681,12 @@ pty_check(int argc, VALUE *argv, VALUE self)
 
     rb_scan_args(argc, argv, "11", &pid, &exc);
     cpid = rb_waitpid(NUM2PIDT(pid), &status, WNOHANG|WUNTRACED);
-    if (cpid == -1) return Qnil;
+    if (cpid == -1 || cpid == 0) return Qnil;
 
     if (!RTEST(exc)) return rb_last_status_get();
     raise_from_check(cpid, status);
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE cPTY;

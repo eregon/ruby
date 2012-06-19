@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 # -*- ruby -*-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
@@ -13,7 +7,9 @@
 
 module Gem
   QUICKLOADER_SUCKAGE = RUBY_VERSION =~ /^1\.9\.1/
-  GEM_PRELUDE_SUCKAGE = RUBY_VERSION =~ /^1\.9\.2/
+
+  # Only MRI 1.9.2 has the custom prelude.
+  GEM_PRELUDE_SUCKAGE = RUBY_VERSION =~ /^1\.9\.2/ && RUBY_ENGINE == "ruby"
 end
 
 if Gem::GEM_PRELUDE_SUCKAGE and defined?(Gem::QuickLoader) then
@@ -32,8 +28,6 @@ if Gem::GEM_PRELUDE_SUCKAGE and defined?(Gem::QuickLoader) then
 end
 
 require 'rubygems/defaults'
-require "rubygems/dependency_list"
-require 'rubygems/path_support'
 require 'rbconfig'
 require "rubygems/deprecate"
 
@@ -118,6 +112,7 @@ require "rubygems/deprecate"
 # * Daniel Berger      -- djberg96(at)gmail.com
 # * Phil Hagelberg     -- technomancy(at)gmail.com
 # * Ryan Davis         -- ryand-ruby(at)zenspider.com
+# * Evan Phoenix       -- evan@phx.io
 #
 # (If your name is missing, PLEASE let us know!)
 #
@@ -126,7 +121,7 @@ require "rubygems/deprecate"
 # -The RubyGems Team
 
 module Gem
-  VERSION = '1.8.5'
+  VERSION = '1.8.23'
 
   ##
   # Raised when RubyGems is unable to load or activate a gem.  Contains the
@@ -264,7 +259,7 @@ module Gem
 
     Gem.path.each do |gemdir|
       each_load_path all_partials(gemdir) do |load_path|
-        result << gemdir.add(load_path).expand_path
+        result << load_path
       end
     end
 
@@ -428,15 +423,15 @@ module Gem
   def self.each_load_path(partials)
     partials.each do |gp|
       base = File.basename gp
-      specfn = dir.specifications.add(base + ".gemspec")
-      if specfn.exist?
-        spec = eval(specfn.read)
+      specfn = File.join(dir, "specifications", "#{base}.gemspec")
+      if File.exists? specfn
+        spec = eval(File.read(specfn))
         spec.require_paths.each do |rp|
-          yield(gp.add(rp))
+          yield File.join(gp,rp)
         end
       else
-        filename = dir.add(gp, 'lib')
-        yield(filename) if filename.exist?
+        filename = File.join(gp, 'lib')
+        yield(filename) if File.exists? filename
       end
     end
   end
@@ -450,6 +445,9 @@ module Gem
   # problem, then we will silently continue.
 
   def self.ensure_gem_subdirectories dir = Gem.dir
+    old_umask = File.umask
+    File.umask old_umask | 002
+
     require 'fileutils'
 
     %w[cache doc gems specifications].each do |name|
@@ -457,6 +455,8 @@ module Gem
       next if File.exist? subdir
       FileUtils.mkdir_p subdir rescue nil # in case of perms issues -- lame
     end
+  ensure
+    File.umask old_umask
   end
 
   ##
@@ -591,7 +591,7 @@ module Gem
 
     Gem.path.each do |gemdir|
       each_load_path(latest_partials(gemdir)) do |load_path|
-        result << gemdir.add(load_path).expand_path
+        result << load_path
       end
     end
 
@@ -642,14 +642,54 @@ module Gem
     index
   end
 
+  @yaml_loaded = false
+
   ##
   # Loads YAML, preferring Psych
 
   def self.load_yaml
-    require 'psych'
-  rescue ::LoadError
-  ensure
+    return if @yaml_loaded
+
+    test_syck = ENV['TEST_SYCK']
+
+    unless test_syck
+      begin
+        gem 'psych', '~> 1.2', '>= 1.2.1'
+      rescue Gem::LoadError
+        # It's OK if the user does not have the psych gem installed.  We will
+        # attempt to require the stdlib version
+      end
+
+      begin
+        # Try requiring the gem version *or* stdlib version of psych.
+        require 'psych'
+      rescue ::LoadError
+        # If we can't load psych, thats fine, go on.
+      else
+        # If 'yaml' has already been required, then we have to
+        # be sure to switch it over to the newly loaded psych.
+        if defined?(YAML::ENGINE) && YAML::ENGINE.yamler != "psych"
+          YAML::ENGINE.yamler = "psych"
+        end
+
+        require 'rubygems/psych_additions'
+        require 'rubygems/psych_tree'
+      end
+    end
+
     require 'yaml'
+
+    # If we're supposed to be using syck, then we may have to force
+    # activate it via the YAML::ENGINE API.
+    if test_syck and defined?(YAML::ENGINE)
+      YAML::ENGINE.yamler = "syck" unless YAML::ENGINE.syck?
+    end
+
+    # Now that we're sure some kind of yaml library is loaded, pull
+    # in our hack to deal with Syck's DefaultKey ugliness.
+    require 'rubygems/syck_hack'
+
+    @yaml_loaded = true
   end
 
   ##
@@ -938,7 +978,7 @@ module Gem
   # Returns the Gem::SourceIndex of specifications that are in the Gem.path
 
   def self.source_index
-    @@source_index ||= Deprecate.skip_during do
+    @@source_index ||= Gem::Deprecate.skip_during do
       SourceIndex.new Gem::Specification.dirs
     end
   end
@@ -969,9 +1009,8 @@ module Gem
 
   def self.loaded_path? path
     # TODO: ruby needs a feature to let us query what's loaded in 1.8 and 1.9
-    $LOADED_FEATURES.find { |s|
-      s =~ /(^|\/)#{Regexp.escape path}#{Regexp.union(*Gem.suffixes)}$/
-    }
+    re = /(^|\/)#{Regexp.escape path}#{Regexp.union(*Gem.suffixes)}$/
+    $LOADED_FEATURES.any? { |s| s =~ re }
   end
 
   ##
@@ -1017,7 +1056,9 @@ module Gem
   # Use the +home+ and +paths+ values for Gem.dir and Gem.path.  Used mainly
   # by the unit tests to provide environment isolation.
 
-  def self.use_paths(home, paths=[])
+  def self.use_paths(home, *paths)
+    paths = nil if paths == [nil]
+    paths = paths.first if Array === Array(paths).first
     self.paths = { "GEM_HOME" => home, "GEM_PATH" => paths }
     # TODO: self.paths = home, paths
   end
@@ -1142,11 +1183,13 @@ module Gem
   autoload :Version,         'rubygems/version'
   autoload :Requirement,     'rubygems/requirement'
   autoload :Dependency,      'rubygems/dependency'
+  autoload :DependencyList,  'rubygems/dependency_list'
   autoload :GemPathSearcher, 'rubygems/gem_path_searcher'
   autoload :SpecFetcher,     'rubygems/spec_fetcher'
   autoload :Specification,   'rubygems/specification'
   autoload :Cache,           'rubygems/source_index'
   autoload :SourceIndex,     'rubygems/source_index'
+  autoload :PathSupport,     'rubygems/path_support'
   autoload :Platform,        'rubygems/platform'
   autoload :Builder,         'rubygems/builder'
   autoload :ConfigFile,      'rubygems/config_file'
@@ -1199,7 +1242,7 @@ end
 # Otherwise return a path to the share area as define by
 # "#{ConfigMap[:datadir]}/#{package_name}".
 
-def RbConfig.datadir(package_name)
+def RbConfig.datadir(package_name) # :nodoc:
   warn "#{Gem.location_of_caller.join ':'}:Warning: " \
     "RbConfig.datadir is deprecated and will be removed on or after " \
     "August 2011.  " \
@@ -1238,11 +1281,9 @@ end
 
 require 'rubygems/custom_require'
 
-Gem.clear_paths
-
 module Gem
   class << self
-    extend Deprecate
+    extend Gem::Deprecate
     deprecate :activate_dep,          "Specification#activate", 2011,  6
     deprecate :activate_spec,         "Specification#activate", 2011,  6
     deprecate :cache,                 "Gem::source_index",      2011,  8

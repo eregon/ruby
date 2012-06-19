@@ -19,6 +19,11 @@
 #endif
 #include "bigdecimal.h"
 
+#ifndef BIGDECIMAL_DEBUG
+# define NDEBUG
+#endif
+#include <assert.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,10 +57,11 @@ static ID id_ceiling;
 static ID id_ceil;
 static ID id_floor;
 static ID id_to_r;
+static ID id_eq;
 
 /* MACRO's to guard objects from GC by keeping them in stack */
 #define ENTER(n) volatile VALUE vStack[n];int iStack=0
-#define PUSH(x)  vStack[iStack++] = (unsigned long)(x);
+#define PUSH(x)  vStack[iStack++] = (VALUE)(x);
 #define SAVE(p)  PUSH(p->obj);
 #define GUARD_OBJ(p,y) {p=y;SAVE(p);}
 
@@ -113,8 +119,9 @@ BigDecimal_version(VALUE self)
     /*
      * 1.0.0: Ruby 1.8.0
      * 1.0.1: Ruby 1.8.1
+     * 1.1.0: Ruby 1.9.3
     */
-    return rb_str_new2("1.0.1");
+    return rb_str_new2("1.1.0");
 }
 
 /*
@@ -124,6 +131,7 @@ static unsigned short VpGetException(void);
 static void  VpSetException(unsigned short f);
 static void  VpInternalRound(Real *c, size_t ixDigit, BDIGIT vPrev, BDIGIT v);
 static int   VpLimitRound(Real *c, size_t ixDigit);
+static Real *VpCopy(Real *pv, Real const* const x);
 
 /*
  *  **** BigDecimal part ****
@@ -166,6 +174,24 @@ ToValue(Real *p)
     return p->obj;
 }
 
+NORETURN(static void cannot_be_coerced_into_BigDecimal(VALUE, VALUE));
+
+static void
+cannot_be_coerced_into_BigDecimal(VALUE exc_class, VALUE v)
+{
+    VALUE str;
+
+    if (rb_special_const_p(v)) {
+	str = rb_inspect(v);
+    }
+    else {
+	str = rb_class_name(rb_obj_class(v));
+    }
+
+    str = rb_str_cat2(rb_str_dup(str), " can't be coerced into BigDecimal");
+    rb_exc_raise(rb_exc_new3(exc_class, str));
+}
+
 static VALUE BigDecimal_div2(int, VALUE*, VALUE);
 
 static Real*
@@ -183,7 +209,7 @@ again:
 	if (prec < 0) goto unable_to_coerce_without_prec;
 	if (prec > DBL_DIG+1)goto SomeOneMayDoIt;
 	v = rb_funcall(v, id_to_r, 0);
-	/* fall through */
+	goto again;
       case T_RATIONAL:
 	if (prec < 0) goto unable_to_coerce_without_prec;
 
@@ -232,8 +258,7 @@ again:
 
 SomeOneMayDoIt:
     if (must) {
-	rb_raise(rb_eTypeError, "%s can't be coerced into BigDecimal",
-		 rb_special_const_p(v) ? RSTRING_PTR(rb_inspect(v)) : rb_obj_classname(v));
+	cannot_be_coerced_into_BigDecimal(rb_eTypeError, v);
     }
     return NULL; /* NULL means to coerce */
 
@@ -287,6 +312,12 @@ BigDecimal_prec(VALUE self)
     return obj;
 }
 
+/*
+ * call-seq: hash
+ *
+ * Creates a hash for this BigDecimal.  Two BigDecimals with equal sign,
+ * fractional part and exponent have the same hash.
+ */
 static VALUE
 BigDecimal_hash(VALUE self)
 {
@@ -529,6 +560,25 @@ VpCreateRbObject(size_t mx, const char *str)
     return pv;
 }
 
+#define VpAllocReal(prec) (Real *)VpMemAlloc(offsetof(Real, frac) + (prec) * sizeof(BDIGIT))
+#define VpReallocReal(ptr, prec) (Real *)VpMemRealloc((ptr), offsetof(Real, frac) + (prec) * sizeof(BDIGIT))
+
+static Real *
+VpCopy(Real *pv, Real const* const x)
+{
+    assert(x != NULL);
+
+    pv = VpReallocReal(pv, x->MaxPrec);
+    pv->MaxPrec = x->MaxPrec;
+    pv->Prec = x->Prec;
+    pv->exponent = x->exponent;
+    pv->sign = x->sign;
+    pv->flag = x->flag;
+    MEMCPY(pv->frac, x->frac, BDIGIT, pv->MaxPrec);
+
+    return pv;
+}
+
 /* Returns True if the value is Not a Number */
 static VALUE
 BigDecimal_IsNaN(VALUE self)
@@ -738,6 +788,14 @@ BigDecimal_coerce(VALUE self, VALUE other)
     return obj;
 }
 
+/*
+ * call-seq: +@
+ *
+ * Return self.
+ *
+ * e.g.
+ *   b = +a  # b == a
+ */
 static VALUE
 BigDecimal_uplus(VALUE self)
 {
@@ -913,6 +971,8 @@ BigDecimalCmp(VALUE self, VALUE r,char op)
     }
 
     rb_bug("Undefined operation in BigDecimalCmp()");
+
+    UNREACHABLE;
 }
 
 /* Returns True if the value is zero. */
@@ -1004,6 +1064,14 @@ BigDecimal_ge(VALUE self, VALUE r)
     return BigDecimalCmp(self, r, 'G');
 }
 
+/*
+ * call-seq: -@
+ *
+ * Return the negation of self.
+ *
+ * e.g.
+ *   b = -a # b == a * -1
+ */
 static VALUE
 BigDecimal_neg(VALUE self)
 {
@@ -1393,7 +1461,7 @@ BigDecimal_abs(VALUE self)
  *
  * Returns the square root of the value.
  *
- * If n is specified, returns at least that many significant digits.
+ * Result has at least n significant digits.
  */
 static VALUE
 BigDecimal_sqrt(VALUE self, VALUE nFig)
@@ -1834,28 +1902,334 @@ BigDecimal_inspect(VALUE self)
     return obj;
 }
 
+static VALUE BigMath_s_exp(VALUE, VALUE, VALUE);
+static VALUE BigMath_s_log(VALUE, VALUE, VALUE);
+
+#define BigMath_exp(x, n) BigMath_s_exp(rb_mBigMath, (x), (n))
+#define BigMath_log(x, n) BigMath_s_log(rb_mBigMath, (x), (n))
+
+inline static int
+is_integer(VALUE x)
+{
+    return (TYPE(x) == T_FIXNUM || TYPE(x) == T_BIGNUM);
+}
+
+inline static int
+is_negative(VALUE x)
+{
+    if (FIXNUM_P(x)) {
+	return FIX2LONG(x) < 0;
+    }
+    else if (TYPE(x) == T_BIGNUM) {
+	return RBIGNUM_NEGATIVE_P(x);
+    }
+    else if (TYPE(x) == T_FLOAT) {
+	return RFLOAT_VALUE(x) < 0.0;
+    }
+    return RTEST(rb_funcall(x, '<', 1, INT2FIX(0)));
+}
+
+#define is_positive(x) (!is_negative(x))
+
+inline static int
+is_zero(VALUE x)
+{
+    VALUE num;
+
+    switch (TYPE(x)) {
+      case T_FIXNUM:
+	return FIX2LONG(x) == 0;
+
+      case T_BIGNUM:
+	return Qfalse;
+
+      case T_RATIONAL:
+	num = RRATIONAL(x)->num;
+	return FIXNUM_P(num) && FIX2LONG(num) == 0;
+
+      default:
+	break;
+    }
+
+    return RTEST(rb_funcall(x, id_eq, 1, INT2FIX(0)));
+}
+
+inline static int
+is_one(VALUE x)
+{
+    VALUE num, den;
+
+    switch (TYPE(x)) {
+      case T_FIXNUM:
+	return FIX2LONG(x) == 1;
+
+      case T_BIGNUM:
+	return Qfalse;
+
+      case T_RATIONAL:
+	num = RRATIONAL(x)->num;
+	den = RRATIONAL(x)->den;
+	return FIXNUM_P(den) && FIX2LONG(den) == 1 &&
+	       FIXNUM_P(num) && FIX2LONG(num) == 1;
+
+      default:
+	break;
+    }
+
+    return RTEST(rb_funcall(x, id_eq, 1, INT2FIX(1)));
+}
+
+inline static int
+is_even(VALUE x)
+{
+    switch (TYPE(x)) {
+      case T_FIXNUM:
+	return (FIX2LONG(x) % 2) == 0;
+
+      case T_BIGNUM:
+	return (RBIGNUM_DIGITS(x)[0] % 2) == 0;
+
+      default:
+	break;
+    }
+
+    return 0;
+}
+
+static VALUE
+rmpd_power_by_big_decimal(Real const* x, Real const* exp, ssize_t const n)
+{
+    VALUE log_x, multiplied, y;
+
+    if (VpIsZero(exp)) {
+	return ToValue(VpCreateRbObject(n, "1"));
+    }
+
+    log_x = BigMath_log(x->obj, SSIZET2NUM(n+1));
+    multiplied = BigDecimal_mult2(exp->obj, log_x, SSIZET2NUM(n+1));
+    y = BigMath_exp(multiplied, SSIZET2NUM(n));
+
+    return y;
+}
+
 /* call-seq:
  * power(n)
+ * power(n, prec)
  *
  * Returns the value raised to the power of n. Note that n must be an Integer.
  *
  * Also available as the operator **
  */
 static VALUE
-BigDecimal_power(VALUE self, VALUE p)
+BigDecimal_power(int argc, VALUE*argv, VALUE self)
 {
     ENTER(5);
+    VALUE vexp, prec;
+    Real* exp = NULL;
     Real *x, *y;
-    ssize_t mp, ma;
-    SIGNED_VALUE n;
+    ssize_t mp, ma, n;
+    SIGNED_VALUE int_exp;
+    double d;
 
-    Check_Type(p, T_FIXNUM);
-    n = FIX2INT(p);
-    ma = n;
+    rb_scan_args(argc, argv, "11", &vexp, &prec);
+
+    GUARD_OBJ(x, GetVpValue(self, 1));
+    n = NIL_P(prec) ? (ssize_t)(x->Prec*VpBaseFig()) : NUM2SSIZET(prec);
+
+    if (VpIsNaN(x)) {
+	y = VpCreateRbObject(n, "0#");
+	RB_GC_GUARD(y->obj);
+	VpSetNaN(y);
+	return ToValue(y);
+    }
+
+retry:
+    switch (TYPE(vexp)) {
+      case T_FIXNUM:
+	break;
+
+      case T_BIGNUM:
+	break;
+
+      case T_FLOAT:
+	d = RFLOAT_VALUE(vexp);
+	if (d == round(d)) {
+	    vexp = LL2NUM((LONG_LONG)round(d));
+	    goto retry;
+	}
+	exp = GetVpValueWithPrec(vexp, DBL_DIG+1, 1);
+	break;
+
+      case T_RATIONAL:
+	if (is_zero(RRATIONAL(vexp)->num)) {
+	    if (is_positive(vexp)) {
+		vexp = INT2FIX(0);
+		goto retry;
+	    }
+	}
+	else if (is_one(RRATIONAL(vexp)->den)) {
+	    vexp = RRATIONAL(vexp)->num;
+	    goto retry;
+	}
+	exp = GetVpValueWithPrec(vexp, n, 1);
+	break;
+
+      case T_DATA:
+	if (is_kind_of_BigDecimal(vexp)) {
+	    VALUE zero = INT2FIX(0);
+	    VALUE rounded = BigDecimal_round(1, &zero, vexp);
+	    if (RTEST(BigDecimal_eq(vexp, rounded))) {
+		vexp = BigDecimal_to_i(vexp);
+		goto retry;
+	    }
+	    exp = DATA_PTR(vexp);
+	    break;
+	}
+	/* fall through */
+      default:
+	rb_raise(rb_eTypeError,
+		 "wrong argument type %s (expected scalar Numeric)",
+		 rb_obj_classname(vexp));
+    }
+
+    if (VpIsZero(x)) {
+	if (is_negative(vexp)) {
+	    y = VpCreateRbObject(n, "#0");
+	    RB_GC_GUARD(y->obj);
+	    if (VpGetSign(x) < 0) {
+		if (is_integer(vexp)) {
+		    if (is_even(vexp)) {
+			/* (-0) ** (-even_integer)  -> Infinity */
+			VpSetPosInf(y);
+		    }
+		    else {
+			/* (-0) ** (-odd_integer)  -> -Infinity */
+			VpSetNegInf(y);
+		    }
+		}
+		else {
+		    /* (-0) ** (-non_integer)  -> Infinity */
+		    VpSetPosInf(y);
+		}
+	    }
+	    else {
+		/* (+0) ** (-num)  -> Infinity */
+		VpSetPosInf(y);
+	    }
+	    return ToValue(y);
+	}
+	else if (is_zero(vexp)) {
+	    return ToValue(VpCreateRbObject(n, "1"));
+	}
+	else {
+	    return ToValue(VpCreateRbObject(n, "0"));
+	}
+    }
+
+    if (is_zero(vexp)) {
+	return ToValue(VpCreateRbObject(n, "1"));
+    }
+    else if (is_one(vexp)) {
+	return self;
+    }
+
+    if (VpIsInf(x)) {
+	if (is_negative(vexp)) {
+	    if (VpGetSign(x) < 0) {
+		if (is_integer(vexp)) {
+		    if (is_even(vexp)) {
+			/* (-Infinity) ** (-even_integer) -> +0 */
+			return ToValue(VpCreateRbObject(n, "0"));
+		    }
+		    else {
+			/* (-Infinity) ** (-odd_integer) -> -0 */
+			return ToValue(VpCreateRbObject(n, "-0"));
+		    }
+		}
+		else {
+		    /* (-Infinity) ** (-non_integer) -> -0 */
+		    return ToValue(VpCreateRbObject(n, "-0"));
+		}
+	    }
+	    else {
+		return ToValue(VpCreateRbObject(n, "0"));
+	    }
+	}
+	else {
+	    y = VpCreateRbObject(n, "0#");
+	    if (VpGetSign(x) < 0) {
+		if (is_integer(vexp)) {
+		    if (is_even(vexp)) {
+			VpSetPosInf(y);
+		    }
+		    else {
+			VpSetNegInf(y);
+		    }
+		}
+		else {
+		    /* TODO: support complex */
+		    rb_raise(rb_eMathDomainError,
+			     "a non-integral exponent for a negative base");
+		}
+	    }
+	    else {
+		VpSetPosInf(y);
+	    }
+	    return ToValue(y);
+	}
+    }
+
+    if (exp != NULL) {
+	return rmpd_power_by_big_decimal(x, exp, n);
+    }
+    else if (TYPE(vexp) == T_BIGNUM) {
+	VALUE abs_value = BigDecimal_abs(self);
+	if (is_one(abs_value)) {
+	    return ToValue(VpCreateRbObject(n, "1"));
+	}
+	else if (RTEST(rb_funcall(abs_value, '<', 1, INT2FIX(1)))) {
+	    if (is_negative(vexp)) {
+		y = VpCreateRbObject(n, "0#");
+		if (is_even(vexp)) {
+		    VpSetInf(y, VpGetSign(x));
+		}
+		else {
+		    VpSetInf(y, -VpGetSign(x));
+		}
+		return ToValue(y);
+	    }
+	    else if (VpGetSign(x) < 0 && is_even(vexp)) {
+		return ToValue(VpCreateRbObject(n, "-0"));
+	    }
+	    else {
+		return ToValue(VpCreateRbObject(n, "0"));
+	    }
+	}
+	else {
+	    if (is_positive(vexp)) {
+		y = VpCreateRbObject(n, "0#");
+		if (is_even(vexp)) {
+		    VpSetInf(y, VpGetSign(x));
+		}
+		else {
+		    VpSetInf(y, -VpGetSign(x));
+		}
+		return ToValue(y);
+	    }
+	    else if (VpGetSign(x) < 0 && is_even(vexp)) {
+		return ToValue(VpCreateRbObject(n, "-0"));
+	    }
+	    else {
+		return ToValue(VpCreateRbObject(n, "0"));
+	    }
+	}
+    }
+
+    int_exp = FIX2INT(vexp);
+    ma = int_exp;
     if (ma < 0)  ma = -ma;
     if (ma == 0) ma = 1;
 
-    GUARD_OBJ(x, GetVpValue(self, 1));
     if (VpIsDef(x)) {
         mp = x->Prec * (VpBaseFig() + 1);
         GUARD_OBJ(y, VpCreateRbObject(mp * (ma + 1), "0"));
@@ -1863,17 +2237,38 @@ BigDecimal_power(VALUE self, VALUE p)
     else {
         GUARD_OBJ(y, VpCreateRbObject(1, "0"));
     }
-    VpPower(y, x, n);
+    VpPower(y, x, int_exp);
     return ToValue(y);
 }
+
+/* call-seq:
+ *   big_decimal ** exp  -> big_decimal
+ *
+ * It is a synonym of big_decimal.power(exp).
+ */
+static VALUE
+BigDecimal_power_op(VALUE self, VALUE exp)
+{
+    return BigDecimal_power(1, &exp, self);
+}
+
+static VALUE
+BigDecimal_s_allocate(VALUE klass)
+{
+    return VpNewRbClass(0, NULL, klass)->obj;
+}
+
+static Real *BigDecimal_new(int argc, VALUE *argv);
 
 /* call-seq:
  *   new(initial, digits)
  *
  * Create a new BigDecimal object.
  *
- * initial:: The initial value, as a String. Spaces are ignored, unrecognized
- *           characters terminate the value.
+ * initial:: The initial value, as an Integer, a Float, a Rational,
+ *           a BigDecimal, or a String.
+ *           If it is a String, spaces are ignored and unrecognized characters
+ *           terminate the value.
  *
  * digits:: The number of significant digits, as a Fixnum. If omitted or 0,
  *          the number of significant digits is determined from the initial
@@ -1883,10 +2278,36 @@ BigDecimal_power(VALUE self, VALUE p)
  * larger than the specified number.
  */
 static VALUE
-BigDecimal_new(int argc, VALUE *argv, VALUE self)
+BigDecimal_initialize(int argc, VALUE *argv, VALUE self)
 {
-    ENTER(5);
-    Real *pv;
+    Real *pv = rb_check_typeddata(self, &BigDecimal_data_type);
+    Real *x = BigDecimal_new(argc, argv);
+
+    if (ToValue(x)) {
+	pv = VpCopy(pv, x);
+    }
+    else {
+	VpFree(pv);
+	pv = x;
+    }
+    DATA_PTR(self) = pv;
+    pv->obj = self;
+    return self;
+}
+
+static VALUE
+BigDecimal_initialize_copy(VALUE self, VALUE other)
+{
+    Real *pv = rb_check_typeddata(self, &BigDecimal_data_type);
+    Real *x = rb_check_typeddata(other, &BigDecimal_data_type);
+
+    DATA_PTR(self) = VpCopy(pv, x);
+    return self;
+}
+
+static Real *
+BigDecimal_new(int argc, VALUE *argv)
+{
     size_t mf;
     VALUE  nFig;
     VALUE  iniValue;
@@ -1899,10 +2320,16 @@ BigDecimal_new(int argc, VALUE *argv, VALUE self)
     }
 
     switch (TYPE(iniValue)) {
+      case T_DATA:
+	if (is_kind_of_BigDecimal(iniValue)) {
+	    return DATA_PTR(iniValue);
+	}
+	break;
+
       case T_FIXNUM:
 	/* fall through */
       case T_BIGNUM:
-	return ToValue(GetVpValue(iniValue, 1));
+	return GetVpValue(iniValue, 1);
 
       case T_FLOAT:
 	if (mf > DBL_DIG+1) {
@@ -1913,23 +2340,25 @@ BigDecimal_new(int argc, VALUE *argv, VALUE self)
 	if (NIL_P(nFig)) {
 	    rb_raise(rb_eArgError, "can't omit precision for a Rational.");
 	}
-	return ToValue(GetVpValueWithPrec(iniValue, mf, 1));
+	return GetVpValueWithPrec(iniValue, mf, 1);
 
       case T_STRING:
 	/* fall through */
       default:
 	break;
     }
-    SafeStringValue(iniValue);
-    GUARD_OBJ(pv, VpNewRbClass(mf, RSTRING_PTR(iniValue),self));
-
-    return ToValue(pv);
+    StringValueCStr(iniValue);
+    rb_check_safe_obj(iniValue);
+    return VpAlloc(mf, RSTRING_PTR(iniValue));
 }
 
 static VALUE
 BigDecimal_global_new(int argc, VALUE *argv, VALUE self)
 {
-    return BigDecimal_new(argc, argv, rb_cBigDecimal);
+    Real *pv = BigDecimal_new(argc, argv);
+    if (ToValue(pv)) pv = VpCopy(NULL, pv);
+    pv->obj = TypedData_Wrap_Struct(rb_cBigDecimal, &BigDecimal_data_type, pv);
+    return pv->obj;
 }
 
  /* call-seq:
@@ -2108,8 +2537,7 @@ BigMath_s_exp(VALUE klass, VALUE x, VALUE vprec)
 	return ToValue(vy);
     }
     else if (vx == NULL) {
-	rb_raise(rb_eArgError, "%s can't be coerced into BigDecimal",
-		 rb_special_const_p(x) ? RSTRING_PTR(rb_inspect(x)) : rb_obj_classname(x));
+	cannot_be_coerced_into_BigDecimal(rb_eArgError, x);
     }
     RB_GC_GUARD(vx->obj);
 
@@ -2264,8 +2692,7 @@ get_vp_value:
 		 "Zero or negative argument for log");
     }
     else if (vx == NULL) {
-	rb_raise(rb_eArgError, "%s can't be coerced into BigDecimal",
-		 rb_special_const_p(x) ? RSTRING_PTR(rb_inspect(x)) : rb_obj_classname(x));
+	cannot_be_coerced_into_BigDecimal(rb_eArgError, x);
     }
     x = ToValue(vx);
 
@@ -2431,17 +2858,21 @@ Init_bigdecimal(void)
 {
     VALUE arg;
 
+    id_BigDecimal_exception_mode = rb_intern_const("BigDecimal.exception_mode");
+    id_BigDecimal_rounding_mode = rb_intern_const("BigDecimal.rounding_mode");
+    id_BigDecimal_precision_limit = rb_intern_const("BigDecimal.precision_limit");
+
     /* Initialize VP routines */
     VpInit(0UL);
 
     /* Class and method registration */
     rb_cBigDecimal = rb_define_class("BigDecimal",rb_cNumeric);
+    rb_define_alloc_func(rb_cBigDecimal, BigDecimal_s_allocate);
 
     /* Global function */
     rb_define_global_function("BigDecimal", BigDecimal_global_new, -1);
 
     /* Class methods */
-    rb_define_singleton_method(rb_cBigDecimal, "new", BigDecimal_new, -1);
     rb_define_singleton_method(rb_cBigDecimal, "mode", BigDecimal_mode, -1);
     rb_define_singleton_method(rb_cBigDecimal, "limit", BigDecimal_limit, -1);
     rb_define_singleton_method(rb_cBigDecimal, "double_fig", BigDecimal_double_fig, 0);
@@ -2557,12 +2988,16 @@ Init_bigdecimal(void)
     rb_define_const(rb_cBigDecimal, "SIGN_NEGATIVE_INFINITE",INT2FIX(VP_SIGN_NEGATIVE_INFINITE));
 
     arg = rb_str_new2("+Infinity");
+    /* Positive infinity value. */
     rb_define_const(rb_cBigDecimal, "INFINITY", BigDecimal_global_new(1, &arg, rb_cBigDecimal));
     arg = rb_str_new2("NaN");
+    /* 'Not a Number' value. */
     rb_define_const(rb_cBigDecimal, "NAN", BigDecimal_global_new(1, &arg, rb_cBigDecimal));
 
 
     /* instance methods */
+    rb_define_method(rb_cBigDecimal, "initialize", BigDecimal_initialize, -1);
+    rb_define_method(rb_cBigDecimal, "initialize_copy", BigDecimal_initialize_copy, 1);
     rb_define_method(rb_cBigDecimal, "precs", BigDecimal_prec, 0);
 
     rb_define_method(rb_cBigDecimal, "add", BigDecimal_add2, 2);
@@ -2595,8 +3030,8 @@ Init_bigdecimal(void)
     rb_define_method(rb_cBigDecimal, "frac", BigDecimal_frac, 0);
     rb_define_method(rb_cBigDecimal, "floor", BigDecimal_floor, -1);
     rb_define_method(rb_cBigDecimal, "ceil", BigDecimal_ceil, -1);
-    rb_define_method(rb_cBigDecimal, "power", BigDecimal_power, 1);
-    rb_define_method(rb_cBigDecimal, "**", BigDecimal_power, 1);
+    rb_define_method(rb_cBigDecimal, "power", BigDecimal_power, -1);
+    rb_define_method(rb_cBigDecimal, "**", BigDecimal_power_op, 1);
     rb_define_method(rb_cBigDecimal, "<=>", BigDecimal_comp, 1);
     rb_define_method(rb_cBigDecimal, "==", BigDecimal_eq, 1);
     rb_define_method(rb_cBigDecimal, "===", BigDecimal_eq, 1);
@@ -2622,10 +3057,6 @@ Init_bigdecimal(void)
     rb_define_singleton_method(rb_mBigMath, "exp", BigMath_s_exp, 2);
     rb_define_singleton_method(rb_mBigMath, "log", BigMath_s_log, 2);
 
-    id_BigDecimal_exception_mode = rb_intern_const("BigDecimal.exception_mode");
-    id_BigDecimal_rounding_mode = rb_intern_const("BigDecimal.rounding_mode");
-    id_BigDecimal_precision_limit = rb_intern_const("BigDecimal.precision_limit");
-
     id_up = rb_intern_const("up");
     id_down = rb_intern_const("down");
     id_truncate = rb_intern_const("truncate");
@@ -2638,6 +3069,7 @@ Init_bigdecimal(void)
     id_ceil = rb_intern_const("ceil");
     id_floor = rb_intern_const("floor");
     id_to_r = rb_intern_const("to_r");
+    id_eq = rb_intern_const("==");
 }
 
 /*
@@ -2689,6 +3121,16 @@ VpMemAlloc(size_t mb)
 #ifdef BIGDECIMAL_DEBUG
     gnAlloc++; /* Count allocation call */
 #endif /* BIGDECIMAL_DEBUG */
+    return p;
+}
+
+VP_EXPORT void *
+VpMemRealloc(void *ptr, size_t mb)
+{
+    void *p = xrealloc(ptr, mb);
+    if (!p) {
+        VpException(VP_EXCEPTION_MEMORY, "failed to allocate memory", 1);
+    }
     return p;
 }
 
@@ -3205,7 +3647,7 @@ VpAlloc(size_t mx, const char *szVal)
        /* necessary to be able to store */
        /* at least mx digits. */
        /* szVal==NULL ==> allocate zero value. */
-       vp = (Real *) VpMemAlloc(sizeof(Real) + mx * sizeof(BDIGIT));
+       vp = VpAllocReal(mx);
        /* xmalloc() alway returns(or throw interruption) */
        vp->MaxPrec = mx;    /* set max precision */
        VpSetZero(vp,1);    /* initialize vp to zero. */
@@ -3238,19 +3680,19 @@ VpAlloc(size_t mx, const char *szVal)
     /* Check on Inf & NaN */
     if (StrCmp(szVal, SZ_PINF) == 0 ||
         StrCmp(szVal, SZ_INF)  == 0 ) {
-        vp = (Real *) VpMemAlloc(sizeof(Real) + sizeof(BDIGIT));
+        vp = VpAllocReal(1);
         vp->MaxPrec = 1;    /* set max precision */
         VpSetPosInf(vp);
         return vp;
     }
     if (StrCmp(szVal, SZ_NINF) == 0) {
-        vp = (Real *) VpMemAlloc(sizeof(Real) + sizeof(BDIGIT));
+        vp = VpAllocReal(1);
         vp->MaxPrec = 1;    /* set max precision */
         VpSetNegInf(vp);
         return vp;
     }
     if (StrCmp(szVal, SZ_NaN) == 0) {
-        vp = (Real *) VpMemAlloc(sizeof(Real) + sizeof(BDIGIT));
+        vp = VpAllocReal(1);
         vp->MaxPrec = 1;    /* set max precision */
         VpSetNaN(vp);
         return vp;
@@ -3308,7 +3750,7 @@ VpAlloc(size_t mx, const char *szVal)
     if (mx <= 0) mx = 1;
     nalloc = Max(nalloc, mx);
     mx = nalloc;
-    vp = (Real *) VpMemAlloc(sizeof(Real) + mx * sizeof(BDIGIT));
+    vp = VpAllocReal(mx);
     /* xmalloc() alway returns(or throw interruption) */
     vp->MaxPrec = mx;        /* set max precision */
     VpSetZero(vp, sign);
@@ -3802,7 +4244,7 @@ VpMult(Real *c, Real *a, Real *b)
 {
     size_t MxIndA, MxIndB, MxIndAB, MxIndC;
     size_t ind_c, i, ii, nc;
-    size_t ind_as, ind_ae, ind_bs, ind_be;
+    size_t ind_as, ind_ae, ind_bs;
     BDIGIT carry;
     BDIGIT_DBL s;
     Real *w;
@@ -3865,17 +4307,14 @@ VpMult(Real *c, Real *a, Real *b)
             ind_as = MxIndA - nc;
             ind_ae = MxIndA;
             ind_bs = MxIndB;
-            ind_be = MxIndB - nc;
         } else if(nc <= MxIndA) {    /* The middle rectangular of the Fig. */
             ind_as = MxIndA - nc;
             ind_ae = MxIndA -(nc - MxIndB);
             ind_bs = MxIndB;
-            ind_be = 0;
         } else if(nc > MxIndA) {    /*  The right triangle of the Fig. */
             ind_as = 0;
             ind_ae = MxIndAB - nc - 1;
             ind_bs = MxIndB -(nc - MxIndA);
-            ind_be = 0;
         }
 
         for(i = ind_as; i <= ind_ae; ++i) {
@@ -4599,7 +5038,6 @@ VP_EXPORT int
 VpCtoV(Real *a, const char *int_chr, size_t ni, const char *frac, size_t nf, const char *exp_chr, size_t ne)
 {
     size_t i, j, ind_a, ma, mi, me;
-    size_t loc;
     SIGNED_VALUE e, es, eb, ef;
     int  sign, signe, exponent_overflow;
 
@@ -4696,7 +5134,6 @@ VpCtoV(Real *a, const char *int_chr, size_t ni, const char *frac, size_t nf, con
             j = 0;
         }
     }
-    loc = 1;
 
     /* get fraction part */
 
@@ -4945,7 +5382,7 @@ VpSqrt(Real *y, Real *x)
 {
     Real *f = NULL;
     Real *r = NULL;
-    size_t y_prec, f_prec;
+    size_t y_prec;
     SIGNED_VALUE n, e;
     SIGNED_VALUE prec;
     ssize_t nr;
@@ -4982,7 +5419,6 @@ VpSqrt(Real *y, Real *x)
 
     nr = 0;
     y_prec = y->MaxPrec;
-    f_prec = f->MaxPrec;
 
     prec = x->exponent - (ssize_t)y_prec;
     if (x->exponent > 0)

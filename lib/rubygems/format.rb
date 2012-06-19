@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -34,7 +28,7 @@ class Gem::Format
   # representing the data in the gem
 
   def self.from_file_by_path(file_path, security_policy = nil)
-    unless File.exist?(file_path)
+    unless File.file?(file_path)
       raise Gem::Exception, "Cannot load gem at [#{file_path}] in #{Dir.pwd}"
     end
 

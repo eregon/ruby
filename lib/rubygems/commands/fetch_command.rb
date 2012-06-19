@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/local_remote_options'
 require 'rubygems/version_option'
@@ -19,6 +13,7 @@ class Gem::Commands::FetchCommand < Gem::Command
     add_bulk_threshold_option
     add_proxy_option
     add_source_option
+    add_clear_sources_option
 
     add_version_option
     add_platform_option
@@ -64,8 +59,16 @@ class Gem::Commands::FetchCommand < Gem::Command
         next
       end
 
-      path = Gem::RemoteFetcher.fetcher.download spec, source_uri
-      FileUtils.mv path, File.basename(spec.cache_file)
+      file = "#{spec.full_name}.gem"
+      remote_path = URI.parse(source_uri) + "gems/#{file}"
+
+      fetch = Gem::RemoteFetcher.fetcher
+
+      gem = fetch.fetch_path remote_path.to_s
+
+      File.open file, "wb" do |f|
+        f.write gem
+      end
 
       say "Downloaded #{spec.full_name}"
     end

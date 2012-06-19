@@ -84,10 +84,14 @@ class BenchmarkDriver
     if @verbose
       @start_time = Time.now
       message @start_time
-      @execs.each_with_index{|(e, v), i|
+      @execs.each_with_index{|(_, v), i|
         message "target #{i}: #{v}"
       }
     end
+  end
+
+  def average results
+    results.inject(:+) / results.length
   end
 
   def show_results
@@ -109,7 +113,10 @@ class BenchmarkDriver
       output "minimum results in each #{@repeat} measurements."
     end
 
-    output "name\t#{@execs.map{|(e, v)| v}.join("\t")}"
+    difference = "\taverage difference" if @execs.length == 2
+    total_difference = 0
+
+    output "name\t#{@execs.map{|(_, v)| v}.join("\t")}#{difference}"
     @results.each{|v, result|
       rets = []
       s = nil
@@ -129,13 +136,24 @@ class BenchmarkDriver
         end
         rets << sprintf("%.3f", r)
       }
+
+      if difference
+        diff = average(result.last) - average(result.first)
+        total_difference += diff
+        rets << sprintf("%.3f", diff)
+      end
+
       output "#{v}#{s}\t#{rets.join("\t")}"
     }
+
+    if difference and @verbose
+      output '-----------------------------------------------------------'
+      output "average total difference is #{total_difference}"
+    end
   end
 
   def files
     flag = {}
-    vm1 = vm2 = wl1 = wl2 = false
     @files = Dir.glob(File.join(@dir, 'bm*.rb')).map{|file|
       next if @pattern && /#{@pattern}/ !~ File.basename(file)
       case file
@@ -205,10 +223,11 @@ class BenchmarkDriver
     }
 
     if $? != 0
-      raise "\`#{cmd}\' exited with abnormal status (#{$?})"
+      output "\`#{cmd}\' exited with abnormal status (#{$?})"
+      0
+    else
+      m.real
     end
-
-    m.real
   end
 end
 
@@ -234,8 +253,8 @@ if __FILE__ == $0
     o.on('-r', '--repeat-count [NUM]', "Repeat count"){|n|
       opt[:repeat] = n.to_i
     }
-    o.on('-o', '--output-file [FILE]', "Output file"){|o|
-      opt[:output] = o
+    o.on('-o', '--output-file [FILE]', "Output file"){|f|
+      opt[:output] = f
     }
     o.on('-q', '--quiet', "Run without notify information except result table."){|q|
       opt[:quiet] = q

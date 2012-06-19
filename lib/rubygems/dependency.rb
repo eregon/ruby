@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems/requirement"
 
 ##
@@ -41,7 +35,7 @@ class Gem::Dependency
     if Regexp === name then
       msg = ["NOTE: Dependency.new w/ a regexp is deprecated.",
              "Dependency.new called from #{Gem.location_of_caller.join(":")}"]
-      warn msg.join("\n") unless Deprecate.skip
+      warn msg.join("\n") unless Gem::Deprecate.skip
     end
 
     type         = Symbol === requirements.last ? requirements.pop : :runtime

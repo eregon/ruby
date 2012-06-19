@@ -61,6 +61,7 @@ def main
   @ruby = File.expand_path('miniruby')
   @verbose = false
   $stress = false
+  @color = nil
   dir = nil
   quiet = false
   tests = nil
@@ -81,6 +82,10 @@ def main
       true
     when /\A(--stress|-s)/
       $stress = true
+    when /\A--color(?:=(?:always|(auto)|(never)|(.*)))?\z/
+      warn "unknown --color argument: #$3" if $3
+      @color = $1 ? nil : !$2
+      true
     when /\A(-q|--q(uiet))\z/
       quiet = true
       true
@@ -92,12 +97,16 @@ Usage: #{File.basename($0, '.*')} --ruby=PATH [--sets=NAME,NAME,...]
         --sets=NAME,NAME,...        Name of test sets.
         --dir=DIRECTORY             Working directory.
                                     default: /tmp/bootstraptestXXXXX.tmpwd
+        --color[=WHEN]              Colorize the output.  WHEN defaults to 'always'
+                                    or can be 'never' or 'auto'.
     -s, --stress                    stress test.
     -v, --verbose                   Output test name before exec.
     -q, --quiet                     Don\'t print header message.
     -h, --help                      Print this message and quit.
 End
       exit true
+    when /\A-j/
+      true
     else
       false
     end
@@ -110,6 +119,24 @@ End
   tests = Dir.glob("#{File.dirname($0)}/test_*.rb").sort if tests.empty?
   pathes = tests.map {|path| File.expand_path(path) }
 
+  @progress = %w[- \\ | /]
+  @progress_bs = "\b" * @progress[0].size
+  @tty = !@verbose && $stderr.tty?
+  case @color
+  when nil
+    @color = @tty && /dumb/ !~ ENV["TERM"]
+  when true
+    @tty = true
+  end
+  if @color
+    # dircolors-like style
+    colors = (colors = ENV['TEST_COLORS']) ? Hash[colors.scan(/(\w+)=([^:]*)/)] : {}
+    @passed = "\e[#{colors["pass"] || "32"}m"
+    @failed = "\e[#{colors["fail"] || "31"}m"
+    @reset = "\e[m"
+  else
+    @passed = @failed = @reset = ""
+  end
   unless quiet
     puts Time.now
     if defined?(RUBY_DESCRIPTION)
@@ -136,8 +163,18 @@ def exec_test(pathes)
   @location = nil
   pathes.each do |path|
     $stderr.print "\n#{File.basename(path)} "
+    $stderr.print @progress[@count % @progress.size] if @tty
     $stderr.puts if @verbose
+    count = @count
+    error = @error
     load File.expand_path(path)
+    if @tty
+      if @error == error
+        $stderr.print "#{@progress_bs}#{@passed}PASS #{@count-count}#{@reset}"
+      else
+        $stderr.print "#{@progress_bs}#{@failed}FAIL #{@error-error}/#{@count-count}#{@reset}"
+      end
+    end
   end
   $stderr.puts
   if @error == 0
@@ -162,13 +199,19 @@ def show_progress(message = '')
   end
   faildesc = yield
   if !faildesc
-    $stderr.print '.'
+    if @tty
+      $stderr.print "#{@progress_bs}#{@progress[@count % @progress.size]}"
+    else
+      $stderr.print '.'
+    end
     $stderr.puts if @verbose
   else
     $stderr.print 'F'
     $stderr.puts if @verbose
     error faildesc, message
   end
+rescue Interrupt
+  raise Interrupt
 rescue Exception => err
   $stderr.print 'E'
   $stderr.puts if @verbose
@@ -342,6 +385,7 @@ def get_result_string(src, opt = '')
     begin
       `#{@ruby} -W0 #{opt} #{filename}`
     ensure
+      raise Interrupt if $?.signaled? && $?.termsig == Signal.list["INT"]
       raise CoreDumpError, "core dumped" if $? and $?.coredump?
     end
   else

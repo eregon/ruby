@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/indexer'
 
@@ -30,6 +24,7 @@ class TestGemIndexer < Gem::TestCase
     @d2_0_b = quick_spec 'd', '2.0.b'
     util_build_gem @d2_0_b
 
+    @_tempdir = @tempdir
     @tempdir = File.join(@tempdir, 'indexer')
 
     gems = File.join(@tempdir, 'gems')
@@ -40,6 +35,11 @@ class TestGemIndexer < Gem::TestCase
                                 :rss_title     => 'ExampleForge gems',
                                 :rss_host      => 'example.com',
                                 :rss_gems_host => 'gems.example.com')
+  end
+
+  def teardown
+    @tempdir = @_tempdir
+    super
   end
 
   def test_initialize

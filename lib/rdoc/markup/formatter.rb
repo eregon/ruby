@@ -4,6 +4,10 @@ require 'rdoc/markup'
 # Base class for RDoc markup formatters
 #
 # Formatters use a visitor pattern to convert content into output.
+#
+# If you'd like to write your own Formatter use
+# RDoc::Markup::FormatterTestCase.  If you're writing a text-output formatter
+# use RDoc::Markup::TextFormatterTestCase which provides extra test cases.
 
 class RDoc::Markup::Formatter
 
@@ -84,7 +88,9 @@ class RDoc::Markup::Formatter
   ##
   # Converts added specials.  See RDoc::Markup#add_special
 
-  def convert_special(special)
+  def convert_special special
+    return special.text if in_tt?
+
     handled = false
 
     RDoc::Markup::Attribute.each_name_of special.type do |name|
