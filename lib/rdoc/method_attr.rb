@@ -110,12 +110,13 @@ class RDoc::MethodAttr < RDoc::CodeObject
   # Order by #singleton then #name
 
   def <=>(other)
+    #return nil unless self.class == other.class
     [     @singleton ? 0 : 1,       name] <=>
     [other.singleton ? 0 : 1, other.name]
   end
 
   def == other # :nodoc:
-    super or self.class == other.class and full_name == other.full_name
+    self.class == other.class and full_name == other.full_name
   end
 
   ##
@@ -181,8 +182,8 @@ class RDoc::MethodAttr < RDoc::CodeObject
       parent != kernel && !searched.include?(kernel)
 
     searched.each do |ancestor|
-      next if parent == ancestor
       next if String === ancestor
+      next if parent == ancestor
 
       other = ancestor.find_method_named('#' << name) ||
               ancestor.find_attribute_named(name)
