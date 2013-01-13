@@ -51,22 +51,6 @@ rb_invcmp(VALUE x, VALUE y)
     }
 }
 
-static VALUE
-cmp_eq(VALUE *a)
-{
-    VALUE c = rb_funcall(a[0], cmp, 1, a[1]);
-
-    if (NIL_P(c)) return Qfalse;
-    if (rb_cmpint(c, a[0], a[1]) == 0) return Qtrue;
-    return Qfalse;
-}
-
-static VALUE
-cmp_failed(void)
-{
-    return Qfalse;
-}
-
 /*
  *  call-seq:
  *     obj == other    -> true or false
@@ -82,12 +66,14 @@ cmp_failed(void)
 static VALUE
 cmp_equal(VALUE x, VALUE y)
 {
-    VALUE a[2];
-
+    VALUE c;
     if (x == y) return Qtrue;
 
-    a[0] = x; a[1] = y;
-    return rb_rescue(cmp_eq, (VALUE)a, cmp_failed, 0);
+    c = rb_funcall(x, cmp, 1, y);
+
+    if (NIL_P(c)) return Qfalse;
+    if (rb_cmpint(c, x, y) == 0) return Qtrue;
+    return Qfalse;
 }
 
 /*
