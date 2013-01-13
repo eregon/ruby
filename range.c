@@ -39,33 +39,15 @@ SET_EXCL(VALUE r, VALUE v)
     return v;
 }
 
-static VALUE
-range_failed(void)
-{
-    rb_raise(rb_eArgError, "bad value for range");
-    return Qnil;		/* dummy */
-}
-
-static VALUE
-range_check(VALUE *args)
-{
-    return rb_funcall(args[0], id_cmp, 1, args[1]);
-}
-
 static void
 range_init(VALUE range, VALUE beg, VALUE end, VALUE exclude_end)
 {
-    VALUE args[2];
-
-    args[0] = beg;
-    args[1] = end;
-
     if (!FIXNUM_P(beg) || !FIXNUM_P(end)) {
 	VALUE v;
 
-	v = rb_rescue(range_check, (VALUE)args, range_failed, 0);
-	if (NIL_P(v))
-	    range_failed();
+	v = rb_check_funcall(beg, id_cmp, 1, &end);
+	if (v != Qundef && NIL_P(v))
+	    rb_raise(rb_eArgError, "bad value for range");
     }
 
     RANGE_SET_EXCL(range, exclude_end);
