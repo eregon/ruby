@@ -4352,6 +4352,8 @@ io_call_close(VALUE io)
 static VALUE
 io_close(VALUE io)
 {
+    /* This is fine to rescue silently,
+       it is called only in internal rb_ensure() clauses. */
     return rb_rescue(io_call_close, io, 0, 0);
 }
 
