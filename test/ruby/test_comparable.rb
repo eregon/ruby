@@ -18,7 +18,7 @@ class TestComparable < Test::Unit::TestCase
     cmp->(x) do 1; end
     assert_equal(false, @o == nil)
     cmp->(x) do raise; end
-    assert_equal(false, @o == nil)
+    assert_raise(RuntimeError) { @o == nil }
   end
 
   def test_gt
