@@ -222,42 +222,24 @@ num_coerce(VALUE x, VALUE y)
     return rb_assoc_new(y, x);
 }
 
-static VALUE
-coerce_body(VALUE *x)
-{
-    return rb_funcall(x[1], id_coerce, 1, x[0]);
-}
-
-static VALUE
-coerce_rescue(VALUE *x)
-{
-    volatile VALUE v = rb_inspect(x[1]);
-
-    rb_raise(rb_eTypeError, "%s can't be coerced into %s",
-	     rb_special_const_p(x[1])?
-	     RSTRING_PTR(v):
-	     rb_obj_classname(x[1]),
-	     rb_obj_classname(x[0]));
-
-    return Qnil;		/* dummy */
-}
-
 static int
 do_coerce(VALUE *x, VALUE *y, int err)
 {
     VALUE ary;
-    VALUE a[2];
 
-    a[0] = *x; a[1] = *y;
-
-    if (!rb_respond_to(*y, id_coerce)) {
+    ary = rb_check_funcall(*y, id_coerce, 1, x);
+    if (ary == Qundef) {
 	if (err) {
-	    coerce_rescue(a);
+	    volatile VALUE v = rb_inspect(*y);
+	    rb_raise(rb_eTypeError, "%s can't be coerced into %s",
+		     rb_special_const_p(*y)?
+		     RSTRING_PTR(v):
+		     rb_obj_classname(*y),
+		     rb_obj_classname(*x));
 	}
 	return FALSE;
     }
 
-    ary = rb_rescue(coerce_body, (VALUE)a, err ? coerce_rescue : 0, (VALUE)a);
     if (!RB_TYPE_P(ary, T_ARRAY) || RARRAY_LEN(ary) != 2) {
 	if (err) {
 	    rb_raise(rb_eTypeError, "coerce must return [x, y]");
