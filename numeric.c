@@ -3205,13 +3205,12 @@ fix_rev(VALUE num)
 }
 
 static int
-bit_coerce(VALUE *x, VALUE *y, int err)
+bit_coerce(VALUE *x, VALUE *y)
 {
     if (!FIXNUM_P(*y) && !RB_TYPE_P(*y, T_BIGNUM)) {
-	do_coerce(x, y, err);
+	do_coerce(x, y, TRUE);
 	if (!FIXNUM_P(*x) && !RB_TYPE_P(*x, T_BIGNUM)
 	    && !FIXNUM_P(*y) && !RB_TYPE_P(*y, T_BIGNUM)) {
-	    if (!err) return FALSE;
 	    rb_raise(rb_eTypeError,
 		     "%s can't be coerced into %s for bitwise arithmetic",
 		     rb_special_const_p(*y) ?
@@ -3225,7 +3224,7 @@ bit_coerce(VALUE *x, VALUE *y, int err)
 VALUE
 rb_num_coerce_bit(VALUE x, VALUE y, ID func)
 {
-    bit_coerce(&x, &y, TRUE);
+    bit_coerce(&x, &y);
     return rb_funcall(x, func, 1, y);
 }
 
@@ -3248,7 +3247,7 @@ fix_and(VALUE x, VALUE y)
 	return rb_big_and(y, x);
     }
 
-    bit_coerce(&x, &y, TRUE);
+    bit_coerce(&x, &y);
     return rb_funcall(x, rb_intern("&"), 1, y);
 }
 
@@ -3271,7 +3270,7 @@ fix_or(VALUE x, VALUE y)
 	return rb_big_or(y, x);
     }
 
-    bit_coerce(&x, &y, TRUE);
+    bit_coerce(&x, &y);
     return rb_funcall(x, rb_intern("|"), 1, y);
 }
 
@@ -3294,7 +3293,7 @@ fix_xor(VALUE x, VALUE y)
 	return rb_big_xor(y, x);
     }
 
-    bit_coerce(&x, &y, TRUE);
+    bit_coerce(&x, &y);
     return rb_funcall(x, rb_intern("^"), 1, y);
 }
 
