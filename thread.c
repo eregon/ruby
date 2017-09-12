@@ -3149,6 +3149,20 @@ rb_thread_local_aset(VALUE thread, ID id, VALUE val)
 	rb_error_frozen("thread locals");
     }
 
+    if (thread != GET_THREAD()->self) {
+        rb_raise(rb_eThreadError, "inter-thread access of TLS prohibited");
+    }
+
+    return threadptr_local_aset(rb_thread_ptr(thread), id, val);
+}
+
+VALUE
+rb_thread_local_aset_no_check(VALUE thread, ID id, VALUE val)
+{
+    if (OBJ_FROZEN(thread)) {
+	rb_error_frozen("thread locals");
+    }
+
     return threadptr_local_aset(rb_thread_ptr(thread), id, val);
 }
 
@@ -3224,6 +3238,10 @@ rb_thread_variable_set(VALUE thread, VALUE id, VALUE val)
 
     if (OBJ_FROZEN(thread)) {
 	rb_error_frozen("thread locals");
+    }
+
+    if (thread != GET_THREAD()->self) {
+        rb_raise(rb_eThreadError, "inter-thread access of TLS prohibited");
     }
 
     locals = rb_ivar_get(thread, id_locals);

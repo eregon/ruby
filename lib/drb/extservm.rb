@@ -87,7 +87,7 @@ module DRb
         pid = spawn("#{command} #{uri} #{name}")
       end
       th = Process.detach(pid)
-      th[:drb_service] = name
+      # th[:drb_service] = name
       th
     end
   end

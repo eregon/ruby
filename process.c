@@ -1093,11 +1093,13 @@ detach_process_watcher(void *arg)
     return rb_last_status_get();
 }
 
+VALUE rb_thread_local_aset_no_check(VALUE thread, ID id, VALUE val);
+
 VALUE
 rb_detach_process(rb_pid_t pid)
 {
     VALUE watcher = rb_thread_create(detach_process_watcher, (void*)(VALUE)pid);
-    rb_thread_local_aset(watcher, id_pid, PIDT2NUM(pid));
+    rb_thread_local_aset_no_check(watcher, id_pid, PIDT2NUM(pid));
     RBASIC_SET_CLASS(watcher, rb_cWaiter);
     return watcher;
 }

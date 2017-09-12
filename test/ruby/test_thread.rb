@@ -108,6 +108,13 @@ class TestThread < Test::Unit::TestCase
     end
   end
 
+  def test_inter_thread_variable
+    t = Thread.new { }
+    assert_raise(ThreadError) do
+      t.thread_variable_set(:foo, "bar")
+    end
+  end
+
   def test_mutex_synchronize
     m = Thread::Mutex.new
     r = 0

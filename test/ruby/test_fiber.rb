@@ -169,6 +169,13 @@ class TestFiber < Test::Unit::TestCase
     assert_equal(nil, Thread.current[:v]);
   end
 
+  def test_inter_thread_tls
+    t = Thread.new { }
+    assert_raise(ThreadError) do
+      t[:foo] = "bar"
+    end
+  end
+
   def test_alive
     fib = Fiber.new{Fiber.yield}
     assert_equal(true, fib.alive?)
