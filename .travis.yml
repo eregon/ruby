@@ -75,6 +75,7 @@ branches:
     - ruby_2_4
     - /^feature\//
     - /^bug\//
+    - travis_compat2
 
 # We want to be notified when something happens.
 notifications:
