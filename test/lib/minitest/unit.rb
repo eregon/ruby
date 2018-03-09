@@ -767,7 +767,11 @@ module MiniTest
       @options ||= {}
     end
 
-    @@installed_at_exit ||= false
+    @installed_at_exit = false
+    class << self
+      attr_accessor :installed_at_exit
+    end
+
     @@out = $stdout
     @@after_tests = []
 
@@ -801,8 +805,8 @@ module MiniTest
         }
 
         exit_code = MiniTest::Unit.new.run ARGV
-      } unless @@installed_at_exit
-      @@installed_at_exit = true
+      } unless installed_at_exit
+      self.installed_at_exit = true
     end
 
     ##

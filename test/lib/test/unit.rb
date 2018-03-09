@@ -1073,8 +1073,8 @@ module Test
           Test::Unit::RunCount.run_once {
             exit(Test::Unit::Runner.new.run(ARGV) || true)
           } unless @@stop_auto_run
-        } unless @@installed_at_exit
-        @@installed_at_exit = true
+        } unless MiniTest::Unit.installed_at_exit
+        MiniTest::Unit.installed_at_exit = true
       end
 
       alias mini_run_suite _run_suite
