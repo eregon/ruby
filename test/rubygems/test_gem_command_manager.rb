@@ -52,7 +52,7 @@ class TestGemCommandManager < Gem::TestCase
 
   def test_run_interrupt
     old_load_path = $:.dup
-    $: << File.expand_path("test/rubygems", @@project_dir)
+    $: << File.expand_path("test/rubygems", Gem::TestCase.project_dir)
     Gem.load_env_plugins
 
     @command_manager.register_command :interrupt
@@ -71,7 +71,7 @@ class TestGemCommandManager < Gem::TestCase
 
   def test_run_crash_command
     old_load_path = $:.dup
-    $: << File.expand_path("test/rubygems", @@project_dir)
+    $: << File.expand_path("test/rubygems", Gem::TestCase.project_dir)
 
     @command_manager.register_command :crash
     use_ui @ui do
@@ -261,4 +261,3 @@ class TestGemCommandManager < Gem::TestCase
   end
 
 end
-

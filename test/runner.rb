@@ -15,7 +15,7 @@ require 'test/unit'
 module Gem
 end
 class Gem::TestCase < MiniTest::Unit::TestCase
-  @@project_dir = File.dirname($LOAD_PATH.last)
+  @project_dir = File.dirname($LOAD_PATH.last)
 end
 
 ENV["GEM_SKIP"] = ENV["GEM_HOME"] = ENV["GEM_PATH"] = "".freeze

@@ -202,7 +202,10 @@ class Gem::TestCase < MiniTest::Unit::TestCase
   undef_method :default_test if instance_methods.include? 'default_test' or
                                 instance_methods.include? :default_test
 
-  @@project_dir = Dir.pwd.untaint unless defined?(@@project_dir)
+  @project_dir = Dir.pwd.untaint unless defined?(@project_dir)
+  class << self
+    attr_accessor :project_dir
+  end
 
   @@initial_reset = false
 
@@ -1216,7 +1219,7 @@ Also, a list:
 
   def build_rake_in(good=true)
     gem_ruby = Gem.ruby
-    Gem.ruby = @@ruby
+    Gem.ruby = Gem::TestCase.ruby
     env_rake = ENV["rake"]
     rake = (good ? @@good_rake : @@bad_rake)
     ENV["rake"] = rake
@@ -1259,7 +1262,11 @@ Also, a list:
     end
   end
 
-  @@ruby = rubybin
+  @ruby = rubybin
+  class << self
+    attr_accessor :ruby
+  end
+
   @@good_rake = "#{rubybin} \"#{File.expand_path('../../../test/rubygems/good_rake.rb', __FILE__)}\""
   @@bad_rake = "#{rubybin} \"#{File.expand_path('../../../test/rubygems/bad_rake.rb', __FILE__)}\""
 

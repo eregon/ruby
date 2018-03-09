@@ -510,7 +510,7 @@ class TestGem < Gem::TestCase
   end
 
   def test_self_find_files
-    cwd = File.expand_path("test/rubygems", @@project_dir)
+    cwd = File.expand_path("test/rubygems", Gem::TestCase.project_dir)
     $LOAD_PATH.unshift cwd
 
     discover_path = File.join 'lib', 'sff', 'discover.rb'
@@ -530,7 +530,7 @@ class TestGem < Gem::TestCase
     Gem.refresh
 
     expected = [
-      File.expand_path('test/rubygems/sff/discover.rb', @@project_dir),
+      File.expand_path('test/rubygems/sff/discover.rb', Gem::TestCase.project_dir),
       File.join(foo2.full_gem_path, discover_path),
       File.join(foo1.full_gem_path, discover_path),
     ]
@@ -545,7 +545,7 @@ class TestGem < Gem::TestCase
     # write_file(File.join Dir.pwd, 'Gemfile') fails on travis 1.8.7 with $SAFE=1
     skip if RUBY_VERSION <= "1.8.7"
 
-    cwd = File.expand_path("test/rubygems", @@project_dir)
+    cwd = File.expand_path("test/rubygems", Gem::TestCase.project_dir)
     actual_load_path = $LOAD_PATH.unshift(cwd).dup
 
     discover_path = File.join 'lib', 'sff', 'discover.rb'
@@ -570,7 +570,7 @@ class TestGem < Gem::TestCase
     Gem.use_gemdeps(File.join Dir.pwd, 'Gemfile')
 
     expected = [
-      File.expand_path('test/rubygems/sff/discover.rb', @@project_dir),
+      File.expand_path('test/rubygems/sff/discover.rb', Gem::TestCase.project_dir),
       File.join(foo1.full_gem_path, discover_path)
     ].sort
 
@@ -581,7 +581,7 @@ class TestGem < Gem::TestCase
   end
 
   def test_self_find_latest_files
-    cwd = File.expand_path("test/rubygems", @@project_dir)
+    cwd = File.expand_path("test/rubygems", Gem::TestCase.project_dir)
     $LOAD_PATH.unshift cwd
 
     discover_path = File.join 'lib', 'sff', 'discover.rb'
@@ -601,7 +601,7 @@ class TestGem < Gem::TestCase
     Gem.refresh
 
     expected = [
-      File.expand_path('test/rubygems/sff/discover.rb', @@project_dir),
+      File.expand_path('test/rubygems/sff/discover.rb', Gem::TestCase.project_dir),
       File.join(foo2.full_gem_path, discover_path),
     ]
 
@@ -753,12 +753,12 @@ class TestGem < Gem::TestCase
   end
 
   def test_self_prefix
-    assert_equal @@project_dir, Gem.prefix
+    assert_equal Gem::TestCase.project_dir, Gem.prefix
   end
 
   def test_self_prefix_libdir
     orig_libdir = RbConfig::CONFIG['libdir']
-    RbConfig::CONFIG['libdir'] = @@project_dir
+    RbConfig::CONFIG['libdir'] = Gem::TestCase.project_dir
 
     assert_nil Gem.prefix
   ensure
@@ -767,7 +767,7 @@ class TestGem < Gem::TestCase
 
   def test_self_prefix_sitelibdir
     orig_sitelibdir = RbConfig::CONFIG['sitelibdir']
-    RbConfig::CONFIG['sitelibdir'] = @@project_dir
+    RbConfig::CONFIG['sitelibdir'] = Gem::TestCase.project_dir
 
     assert_nil Gem.prefix
   ensure
@@ -1823,7 +1823,7 @@ You may need to `gem install -g` to install missing gems
 
   def with_plugin(path)
     test_plugin_path = File.expand_path("test/rubygems/plugin/#{path}",
-                                        @@project_dir)
+                                        Gem::TestCase.project_dir)
 
     # A single test plugin should get loaded once only, in order to preserve
     # sane test semantics.
