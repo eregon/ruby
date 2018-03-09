@@ -5,7 +5,6 @@ class CGI
   extend Util
 end
 module CGI::Util
-  @@accept_charset="UTF-8" unless defined?(@@accept_charset)
   # URL-encode a string.
   #   url_encoded_string = CGI::escape("'Stop!' said Fred")
   #      # => "%27Stop%21%27+said+Fred"
@@ -19,7 +18,7 @@ module CGI::Util
   # URL-decode a string with encoding(optional).
   #   string = CGI::unescape("%27Stop%21%27+said+Fred")
   #      # => "'Stop!' said Fred"
-  def unescape(string,encoding=@@accept_charset)
+  def unescape(string,encoding=CGI.accept_charset)
     str=string.tr('+', ' ').b.gsub(/((?:%[0-9a-fA-F]{2})+)/) do |m|
       [m.delete('%')].pack('H*')
     end.force_encoding(encoding)

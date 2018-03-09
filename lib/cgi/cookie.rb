@@ -38,7 +38,6 @@ class CGI
   #   cookie1.secure   = true
   #   cookie1.httponly = true
   class Cookie < Array
-    @@accept_charset="UTF-8" unless defined?(@@accept_charset)
 
     # Create a new CGI::Cookie object.
     #
@@ -167,7 +166,7 @@ class CGI
         next unless name and values
         name = CGI.unescape(name)
         values ||= ""
-        values = values.split('&').collect{|v| CGI.unescape(v,@@accept_charset) }
+        values = values.split('&').collect{|v| CGI.unescape(v) }
         if cookies.has_key?(name)
           values = cookies[name].value + values
         end
@@ -184,5 +183,3 @@ class CGI
 
   end # class Cookie
 end
-
-

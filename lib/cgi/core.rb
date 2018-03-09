@@ -6,7 +6,6 @@
 class CGI
   unless const_defined?(:Util)
     module Util
-      @@accept_charset = "UTF-8" # :nodoc:
     end
     include Util
     extend Util
@@ -741,7 +740,7 @@ class CGI
   #
   #   CGI.accept_charset = "EUC-JP"
   #
-  @@accept_charset="UTF-8" if false # needed for rdoc?
+  @@accept_charset="UTF-8"
 
   # Return the accept character set for all new CGI instances.
   def self.accept_charset
