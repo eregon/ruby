@@ -2853,11 +2853,11 @@ cvar_front_klass(VALUE klass)
 	    return obj;
 	}
     }
-    return RCLASS_SUPER(klass);
+    return NULL;
 }
 
 #define CVAR_FOREACH_ANCESTORS(klass, v, r) \
-    for (klass = cvar_front_klass(klass); klass; klass = RCLASS_SUPER(klass)) { \
+    if (klass = cvar_front_klass(klass)) { \
 	if (cvar_lookup_at(klass, id, (v))) { \
 	    r; \
 	} \
