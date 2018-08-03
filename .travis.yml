@@ -63,6 +63,11 @@ script:
   - "make -s test TESTOPTS=--color=never"
   - "make -s $JOBS test-all -o exts TESTOPTS='-q --color=never --job-status=normal' RUBY_FORCE_TEST_JIT=1"
   - "make -s $JOBS test-spec MSPECOPT=-j"
+  - echo "Running ruby/spec on 2.3.7 to ensure version guards are correctly added"
+  - rvm install 2.3.7
+  - cd ../spec/ruby
+  - chmod -R u+w .
+  - ../mspec/bin/mspec -j .
 
 # Branch matrix.  Not all branches are Travis-ready so we limit branches here.
 branches:
@@ -74,28 +79,7 @@ branches:
     - ruby_2_5
     - /^feature\//
     - /^bug\//
-
-# We want to be notified when something happens.
-notifications:
-  irc:
-    channels:
-      - "chat.freenode.net#ruby-core"
-      - "chat.freenode.net#ruby-ja"
-    on_success: change # [always|never|change] # default: always
-    on_failure: always # [always|never|change] # default: always
-    template:
-      - "%{message} by @%{author}: See %{build_url}"
-
-  slack:
-    rooms:
-      - secure: i1GLETSKye85ea6dGNA3MxI/5myChmMFiZtBd5C69xK+s1sBFqEgOSbaSf9KHc0CYrHVyNhQMaZRruieV7xS+6Pfs0Zvxf1DO6QQTWC2KhkqwFDLvZncAzjoyASdR90hbr+iRPOngQ+HJuE94zemALAwEqNAinzA74PMiJXktqY= # ruby:<token>#commits
-      - secure: ah7UEHBvncXT7bM5mvYIQAO+tIyV/wl7nXLb7wQD16dO2v8Gragy0mWjB79Q09hrrMGmp6H9bCDpdGS80boIA5EHaHoG4QaP0i9bsSt8U2AMWgZtfyIgQKJ4H2kXkGlrjO+AXTgnIkP7LNjdgAVUUTGQPb26T3QmoN2Splt+fIQ= # ruby:<token>#alerts
-    on_pull_requests: false
-    on_success: change
-    on_failure: always
-
-  email:
-    - ko1c-failure@atdot.net
+    - specs25
 
 # Local Variables:
 # mode: YAML
