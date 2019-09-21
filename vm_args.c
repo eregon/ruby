@@ -784,7 +784,10 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
 	args->kw_argv = NULL;
     }
 
-    if (kw_flag && iseq->body->param.flags.ruby2_keywords) {
+    if (kw_flag &&
+            iseq->body->param.flags.has_rest &&
+            !iseq->body->param.flags.has_kw &&
+            !iseq->body->param.flags.has_kwrest) {
         remove_empty_keyword_hash = 0;
     }
 
