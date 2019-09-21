@@ -2725,46 +2725,46 @@ class TestKeywordArguments < Test::Unit::TestCase
 
   def test_ruby2_keywords
     c = Class.new do
-      ruby2_keywords def foo(meth, *args)
+      def foo(meth, *args)
         send(meth, *args)
       end
 
-      ruby2_keywords(define_method(:bfoo) do |meth, *args|
+      define_method(:bfoo) do |meth, *args|
         send(meth, *args)
-      end)
+      end
 
-      ruby2_keywords def foo_bar(*args)
+      def foo_bar(*args)
         bar(*args)
       end
 
-      ruby2_keywords def foo_baz(*args)
+      def foo_baz(*args)
         baz(*args)
       end
 
-      ruby2_keywords def foo_baz2(*args)
+      def foo_baz2(*args)
         baz(*args)
         baz(*args)
       end
 
-      ruby2_keywords def foo_foo_bar(meth, *args)
+      def foo_foo_bar(meth, *args)
         foo_bar(meth, *args)
       end
 
-      ruby2_keywords def foo_foo_baz(meth, *args)
+      def foo_foo_baz(meth, *args)
         foo_baz(meth, *args)
       end
 
-      ruby2_keywords def foo_mod(meth, *args)
+      def foo_mod(meth, *args)
         args << 1
         send(meth, *args)
       end
 
-      ruby2_keywords def foo_bar_mod(*args)
+      def foo_bar_mod(*args)
         args << 1
         bar(*args)
       end
 
-      ruby2_keywords def foo_baz_mod(*args)
+      def foo_baz_mod(*args)
         args << 1
         baz(*args)
       end
@@ -2781,11 +2781,11 @@ class TestKeywordArguments < Test::Unit::TestCase
         args
       end
 
-      ruby2_keywords def foo_dbar(*args)
+      def foo_dbar(*args)
         dbar(*args)
       end
 
-      ruby2_keywords def foo_dbaz(*args)
+      def foo_dbaz(*args)
         dbaz(*args)
       end
 
@@ -2801,15 +2801,15 @@ class TestKeywordArguments < Test::Unit::TestCase
         self.class.new(*args).init_args
       end
 
-      ruby2_keywords def block(*args)
+      def block(*args)
         ->(*args, **kw){[args, kw]}.(*args)
       end
 
-      ruby2_keywords def cfunc(*args)
+      def cfunc(*args)
         self.class.new(*args).init_args
       end
 
-      ruby2_keywords def store_foo(meth, *args)
+      def store_foo(meth, *args)
         @stored_args = args
         use(meth)
       end
@@ -2836,21 +2836,21 @@ class TestKeywordArguments < Test::Unit::TestCase
     end
 
     implicit_super = Class.new(c) do
-      ruby2_keywords def bar(*args)
+      def bar(*args)
         super
       end
 
-      ruby2_keywords def baz(*args)
+      def baz(*args)
         super
       end
     end
 
     explicit_super = Class.new(c) do
-      ruby2_keywords def bar(*args)
+      def bar(*args)
         super(*args)
       end
 
-      ruby2_keywords def baz(*args)
+      def baz(*args)
         super(*args)
       end
     end
@@ -3088,7 +3088,7 @@ class TestKeywordArguments < Test::Unit::TestCase
       def bar(*a, **kw)
         p a, kw
       end
-      ruby2_keywords def foo(*a)
+      def foo(*a)
         bar(*a)
       end
       foo(1, 2, 3, k:1)
