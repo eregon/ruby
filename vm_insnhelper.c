@@ -1909,18 +1909,10 @@ CALLER_SETUP_ARG(struct rb_control_frame_struct *restrict cfp,
                  const struct rb_call_info *restrict ci)
 {
     if (UNLIKELY(IS_ARGS_SPLAT(ci))) {
-        VALUE final_hash;
         /* This expands the rest argument to the stack.
          * So, ci->flag & VM_CALL_ARGS_SPLAT is now inconsistent.
          */
         vm_caller_setup_arg_splat(cfp, calling);
-        if (!IS_ARGS_KW_OR_KW_SPLAT(ci) &&
-                calling->argc > 0 &&
-                RB_TYPE_P((final_hash = *(cfp->sp - 1)), T_HASH) &&
-                (((struct RHash *)final_hash)->basic.flags & RHASH_PASS_AS_KEYWORDS)) {
-            *(cfp->sp - 1) = rb_hash_dup(final_hash);
-            calling->kw_splat = 1;
-        }
     }
     if (UNLIKELY(IS_ARGS_KEYWORD(ci))) {
         /* This converts VM_CALL_KWARG style to VM_CALL_KW_SPLAT style
