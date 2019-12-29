@@ -1808,76 +1808,8 @@ rb_mod_private(int argc, VALUE *argv, VALUE module)
 static VALUE
 rb_mod_ruby2_keywords(int argc, VALUE *argv, VALUE module)
 {
-    int i;
-    VALUE origin_class = RCLASS_ORIGIN(module);
-
-    rb_check_frozen(module);
-
-    for (i = 0; i < argc; i++) {
-        VALUE v = argv[i];
-        ID name = rb_check_id(&v);
-        rb_method_entry_t *me;
-        VALUE defined_class;
-
-        if (!name) {
-            rb_print_undef_str(module, v);
-        }
-
-        me = search_method(origin_class, name, &defined_class);
-        if (!me && RB_TYPE_P(module, T_MODULE)) {
-            me = search_method(rb_cObject, name, &defined_class);
-        }
-
-        if (UNDEFINED_METHOD_ENTRY_P(me) ||
-            UNDEFINED_REFINED_METHOD_P(me->def)) {
-            rb_print_undef(module, name, METHOD_VISI_UNDEF);
-        }
-
-        if (module == defined_class || origin_class == defined_class) {
-            switch (me->def->type) {
-              case VM_METHOD_TYPE_ISEQ:
-                if (me->def->body.iseq.iseqptr->body->param.flags.has_rest &&
-                        !me->def->body.iseq.iseqptr->body->param.flags.has_kw &&
-                        !me->def->body.iseq.iseqptr->body->param.flags.has_kwrest) {
-                    me->def->body.iseq.iseqptr->body->param.flags.ruby2_keywords = 1;
-                    rb_clear_method_cache_by_class(module);
-                }
-                else {
-                    rb_warn("Skipping set of ruby2_keywords flag for %s (method accepts keywords or method does not accept argument splat)", rb_id2name(name));
-                }
-                break;
-              case VM_METHOD_TYPE_BMETHOD: {
-                VALUE procval = me->def->body.bmethod.proc;
-                if (vm_block_handler_type(procval) == block_handler_type_proc) {
-                    procval = vm_proc_to_block_handler(VM_BH_TO_PROC(procval));
-                }
-
-                if (vm_block_handler_type(procval) == block_handler_type_iseq) {
-                    const struct rb_captured_block *captured = VM_BH_TO_ISEQ_BLOCK(procval);
-                    const rb_iseq_t *iseq = rb_iseq_check(captured->code.iseq);
-                    if (iseq->body->param.flags.has_rest &&
-                            !iseq->body->param.flags.has_kw &&
-                            !iseq->body->param.flags.has_kwrest) {
-                        iseq->body->param.flags.ruby2_keywords = 1;
-                        rb_clear_method_cache_by_class(module);
-                    }
-                    else {
-                        rb_warn("Skipping set of ruby2_keywords flag for %s (method accepts keywords or method does not accept argument splat)", rb_id2name(name));
-                    }
-                    return Qnil;
-                }
-              }
-              /* fallthrough */
-              default:
-                rb_warn("Skipping set of ruby2_keywords flag for %s (method not defined in Ruby)", rb_id2name(name));
-                break;
-            }
-        }
-        else {
-            rb_warn("Skipping set of ruby2_keywords flag for %s (can only set in method defining module)", rb_id2name(name));
-        }
-    }
-    return Qnil;
+    rb_warn("ruby2_keywords has no effect");
+    return module;
 }
 
 /*
