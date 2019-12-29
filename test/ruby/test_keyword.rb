@@ -3055,32 +3055,6 @@ class TestKeywordArguments < Test::Unit::TestCase
     assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `initialize'/m) do
       assert_equal([[1], h1], o.foo(:pass_cfunc, 1, :a=>1))
     end
-
-    assert_warn(/Skipping set of ruby2_keywords flag for bar \(method accepts keywords or method does not accept argument splat\)/) do
-      assert_nil(c.send(:ruby2_keywords, :bar))
-    end
-
-    o = Object.new
-    class << o
-      alias bar p
-    end
-    assert_warn(/Skipping set of ruby2_keywords flag for bar \(method not defined in Ruby\)/) do
-      assert_nil(o.singleton_class.send(:ruby2_keywords, :bar))
-    end
-    sc = Class.new(c)
-    assert_warn(/Skipping set of ruby2_keywords flag for bar \(can only set in method defining module\)/) do
-      sc.send(:ruby2_keywords, :bar)
-    end
-    m = Module.new
-    assert_warn(/Skipping set of ruby2_keywords flag for system \(can only set in method defining module\)/) do
-      m.send(:ruby2_keywords, :system)
-    end
-
-    assert_raise(NameError) { c.send(:ruby2_keywords, "a5e36ccec4f5080a1d5e63f8") }
-    assert_raise(NameError) { c.send(:ruby2_keywords, :quux) }
-
-    c.freeze
-    assert_raise(FrozenError) { c.send(:ruby2_keywords, :baz) }
   end
 
   def test_top_ruby2_keywords
