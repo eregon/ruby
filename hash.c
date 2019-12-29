@@ -4543,6 +4543,12 @@ rb_hash_deconstruct_keys(VALUE hash, VALUE keys)
     return hash;
 }
 
+static VALUE
+rb_hash_flagged_p(VALUE hash)
+{
+    return (((struct RHash *)hash)->basic.flags & RHASH_PASS_AS_KEYWORDS) ? Qtrue : Qfalse;
+}
+
 static int
 add_new_i(st_data_t *key, st_data_t *val, st_data_t arg, int existing)
 {
@@ -6410,6 +6416,8 @@ Init_Hash(void)
     rb_define_method(rb_cHash, ">", rb_hash_gt, 1);
 
     rb_define_method(rb_cHash, "deconstruct_keys", rb_hash_deconstruct_keys, 1);
+
+    rb_define_method(rb_cHash, "flagged?", rb_hash_flagged_p, 0);
 
     /* Document-class: ENV
      *
