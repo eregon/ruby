@@ -734,6 +734,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
     VALUE * const orig_sp = ec->cfp->sp;
     unsigned int i;
     int remove_empty_keyword_hash = 1;
+    int ruby2_keywords_semantics = 0;
     VALUE flag_keyword_hash = 0;
 
     vm_check_canary(ec, orig_sp);
@@ -788,7 +789,8 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
             iseq->body->param.flags.has_rest &&
             !iseq->body->param.flags.has_kw &&
             !iseq->body->param.flags.has_kwrest) {
-        remove_empty_keyword_hash = 0;
+        // remove_empty_keyword_hash = 0;
+        ruby2_keywords_semantics = 1;
     }
 
     if (ci->flag & VM_CALL_ARGS_SPLAT) {
@@ -806,7 +808,8 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
                 rest_last = rb_hash_dup(rest_last);
                 kw_flag |= VM_CALL_KW_SPLAT;
                 if (iseq->body->param.flags.ruby2_keywords) {
-                    remove_empty_keyword_hash = 0;
+                    // remove_empty_keyword_hash = 0;
+                    ruby2_keywords_semantics = 1;
                 }
             }
             else {
@@ -831,7 +834,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
                     rb_warn_keyword_to_last_hash(ec, calling, ci, iseq);
                 }
 	    }
-            else if (!remove_empty_keyword_hash && rest_last) {
+            else if (ruby2_keywords_semantics && rest_last) {
                 flag_keyword_hash = rest_last;
             }
         }
@@ -854,8 +857,8 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
                     rb_warn_keyword_to_last_hash(ec, calling, ci, iseq);
                 }
 	    }
-            else if (!remove_empty_keyword_hash) {
-                flag_keyword_hash = args->argv[args->argc-1];
+            else if (ruby2_keywords_semantics) {
+                flag_keyword_hash = last_arg;
             }
         }
 	args->rest = Qfalse;
