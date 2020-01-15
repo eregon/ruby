@@ -733,7 +733,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
     VALUE keyword_hash = Qnil;
     VALUE * const orig_sp = ec->cfp->sp;
     unsigned int i;
-    int remove_empty_keyword_hash = 1;
+    int remove_empty_keyword_hash = 0;
     VALUE flag_keyword_hash = 0;
 
     vm_check_canary(ec, orig_sp);
@@ -865,7 +865,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
         ((struct RHash *)flag_keyword_hash)->basic.flags |= RHASH_PASS_AS_KEYWORDS;
     }
 
-    if (kw_flag && iseq->body->param.flags.accepts_no_kwarg) {
+    if (kw_flag && iseq->body->param.flags.accepts_no_kwarg && !RHASH_EMPTY_P(args->argv[args->argc-1])) {
 	rb_raise(rb_eArgError, "no keywords accepted");
     }
 

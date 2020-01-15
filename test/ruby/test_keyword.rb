@@ -2859,8 +2859,8 @@ class TestKeywordArguments < Test::Unit::TestCase
     o = c.new
 
     assert_equal([1, h1], o.foo_baz2(1, :a=>1))
-    assert_equal([1], o.foo_baz2(1, **{}))
-    assert_equal([h1], o.foo_baz2(h1, **{}))
+    assert_equal([1, {}], o.foo_baz2(1, **{}))
+    assert_equal([h1, {}], o.foo_baz2(h1, **{}))
 
     assert_equal([[1], h1], o.foo(:bar, 1, :a=>1))
     assert_equal([1, h1], o.foo(:baz, 1, :a=>1))
@@ -2899,13 +2899,13 @@ class TestKeywordArguments < Test::Unit::TestCase
     assert_equal([[h1], {}], o.store_foo(:bar, h1, **{}))
     assert_equal([h1, {}], o.store_foo(:baz, h1, **{}))
     assert_equal([[h1], {}], o.foo_bar(h1, **{}))
-    assert_equal([h1], o.foo_baz(h1, **{}))
+    assert_equal([h1, {}], o.foo_baz(h1, **{}))
     assert_equal([[h1], {}], o.foo(:foo, :bar, h1, **{}))
     assert_equal([h1, {}], o.foo(:foo, :baz, h1, **{}))
     assert_equal([[h1], {}], o.foo(:foo_bar, h1, **{}))
-    assert_equal([h1], o.foo(:foo_baz, h1, **{}))
+    assert_equal([h1, {}], o.foo(:foo_baz, h1, **{}))
     assert_equal([[h1], {}], o.foo_foo_bar(h1, **{}))
-    assert_equal([h1], o.foo_foo_baz(h1, **{}))
+    assert_equal([h1, {}], o.foo_foo_baz(h1, **{}))
 
     assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `bar'/m) do
       assert_equal([[1], h1], o.foo(:bar, 1, h1))
@@ -3027,7 +3027,7 @@ class TestKeywordArguments < Test::Unit::TestCase
     assert_equal([1, h1], o.baz(1, :a=>1))
     assert_equal([1, h1], o.baz(1, **h1))
     assert_equal([1, h1], o.baz(1, h1))
-    assert_equal([h1], o.baz(h1, **{}))
+    assert_equal([h1, {}], o.baz(h1, **{}))
 
     o = explicit_super.new
     assert_equal([[1], h1], o.bar(1, :a=>1))
@@ -3040,7 +3040,7 @@ class TestKeywordArguments < Test::Unit::TestCase
     assert_equal([1, h1], o.baz(1, :a=>1))
     assert_equal([1, h1], o.baz(1, **h1))
     assert_equal([1, h1], o.baz(1, h1))
-    assert_equal([h1], o.baz(h1, **{}))
+    assert_equal([h1, {}], o.baz(h1, **{}))
 
     c.class_eval do
       remove_method(:bar)
