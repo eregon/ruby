@@ -3048,11 +3048,11 @@ class TestKeywordArguments < Test::Unit::TestCase
         [args, kw]
       end
     end
-    assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `bar'/m) do
+    assert_warn('') do
       assert_equal([[1], h1], o.foo(:pass_bar, 1, :a=>1))
     end
 
-    assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `initialize'/m) do
+    assert_warn('') do
       assert_equal([[1], h1], o.foo(:pass_cfunc, 1, :a=>1))
     end
   end
