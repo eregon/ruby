@@ -537,7 +537,9 @@ describe "A method" do
       m(1).should == [1]
       m(1, 2, 3).should == [1, 2, 3]
       m(*[]).should == []
-      m(**{}).should == []
+
+      empty_hash = {}
+      m(**empty_hash).should == [{}]
     end
 
     evaluate <<-ruby do
