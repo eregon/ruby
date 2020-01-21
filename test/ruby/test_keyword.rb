@@ -3048,13 +3048,9 @@ class TestKeywordArguments < Test::Unit::TestCase
         [args, kw]
       end
     end
-    assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `bar'/m) do
-      assert_equal([[1], h1], o.foo(:pass_bar, 1, :a=>1))
-    end
 
-    assert_warn(/Using the last argument as keyword parameters is deprecated.*The called method `initialize'/m) do
-      assert_equal([[1], h1], o.foo(:pass_cfunc, 1, :a=>1))
-    end
+    assert_equal([[1], h1], o.foo(:pass_bar, 1, :a=>1))
+    assert_equal([[1], h1], o.foo(:pass_cfunc, 1, :a=>1))
 
     assert_warn(/Skipping set of ruby2_keywords flag for bar \(method accepts keywords or method does not accept argument splat\)/) do
       assert_nil(c.send(:ruby2_keywords, :bar))
