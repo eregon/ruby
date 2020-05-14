@@ -50,4 +50,12 @@ module Kernel
   def Float(arg, exception: true)
     __builtin_rb_f_float(arg, exception)
   end
+
+  def self.foo_builtin(a, b = nil)
+    __builtin_rb_foo(a, b)
+  end
+
+  def self.foo_pure_ruby(a, b = nil)
+    b.nil? ? a : b
+  end
 end

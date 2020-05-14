@@ -1,0 +1,4 @@
+benchmark:
+  foo_c(42): Kernel.foo_c(42)
+  foo_builtin(42): Kernel.foo_builtin(42)
+  foo_pure_ruby(42): Kernel.foo_pure_ruby(42)

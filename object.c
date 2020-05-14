@@ -4549,6 +4549,18 @@ f_sprintf(int c, const VALUE *v, VALUE _)
  *++
  */
 
+static VALUE
+rb_foo(rb_execution_context_t *ec, VALUE self, VALUE a, VALUE b) {
+    return NIL_P(b) ? a : b;
+}
+
+static VALUE
+foo_c(int argc, VALUE *argv, VALUE klass) {
+  VALUE a, b;
+  rb_scan_args(argc, argv, "11", &a, &b);
+  return NIL_P(b) ? a : b;
+}
+
 void
 InitVM_Object(void)
 {
@@ -4597,6 +4609,8 @@ InitVM_Object(void)
     rb_define_private_method(rb_cModule, "method_added", rb_obj_dummy1, 1);
     rb_define_private_method(rb_cModule, "method_removed", rb_obj_dummy1, 1);
     rb_define_private_method(rb_cModule, "method_undefined", rb_obj_dummy1, 1);
+
+    rb_define_singleton_method(rb_mKernel, "foo_c", foo_c, -1);
 
     rb_define_method(rb_mKernel, "nil?", rb_false, 0);
     rb_define_method(rb_mKernel, "===", case_equal, 1);
