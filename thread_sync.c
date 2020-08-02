@@ -52,7 +52,7 @@ static void rb_mutex_abandon_all(rb_mutex_t *mutexes);
 static void rb_mutex_abandon_keeping_mutexes(rb_thread_t *th);
 static void rb_mutex_abandon_locking_mutex(rb_thread_t *th);
 #endif
-static const char* rb_mutex_unlock_th(rb_mutex_t *mutex, rb_thread_t *th, rb_fiber_t *fiber);
+static const char* rb_mutex_unlock_th(VALUE self, rb_mutex_t *mutex, rb_thread_t *th, rb_fiber_t *fiber);
 
 /*
  *  Document-class: Mutex
@@ -101,7 +101,7 @@ mutex_free(void *ptr)
     rb_mutex_t *mutex = ptr;
     if (mutex->fiber) {
 	/* rb_warn("free locked mutex"); */
-	const char *err = rb_mutex_unlock_th(mutex, fiber_thread_ptr(mutex->fiber), mutex->fiber);
+	const char *err = rb_mutex_unlock_th(Qnil, mutex, fiber_thread_ptr(mutex->fiber), mutex->fiber);
 	if (err) rb_bug("%s", err);
     }
     ruby_xfree(ptr);
@@ -193,7 +193,7 @@ mutex_locked(rb_thread_t *th, VALUE self)
     }
     th->keeping_mutexes = mutex;
 
-    th->blocking += 1;
+    // th->blocking += 1;
 }
 
 /*
@@ -261,6 +261,17 @@ do_mutex_lock(VALUE self, int interruptible_p)
 	}
 
 	w.th = th;
+
+	VALUE scheduler = rb_thread_scheduler_if_nonblocking(th->self);
+	if (scheduler != Qnil) {
+	    while (mutex->fiber != fiber) {
+	        list_add_tail(&mutex->waitq, &w.node);
+	        rb_funcall(scheduler, rb_intern("wait_mutex"), 1, self);
+	        list_del(&w.node);
+
+	        rb_mutex_trylock(self);
+            }
+	}
 
 	while (mutex->fiber != fiber) {
 	    enum rb_thread_status prev_status = th->status;
@@ -358,44 +369,56 @@ rb_mutex_owned_p(VALUE self)
 }
 
 static const char *
-rb_mutex_unlock_th(rb_mutex_t *mutex, rb_thread_t *th, rb_fiber_t *fiber)
+rb_mutex_unlock_th(VALUE self, rb_mutex_t *mutex, rb_thread_t *th, rb_fiber_t *fiber) // th is owner thread
 {
     const char *err = NULL;
 
     if (mutex->fiber == 0) {
-	err = "Attempt to unlock a mutex which is not locked";
+	return "Attempt to unlock a mutex which is not locked";
     }
     else if (mutex->fiber != fiber) {
-	err = "Attempt to unlock a mutex which is locked by another thread/fiber";
+	return "Attempt to unlock a mutex which is locked by another thread/fiber";
     }
-    else {
-	struct sync_waiter *cur = 0, *next;
-	rb_mutex_t **th_mutex = &th->keeping_mutexes;
 
-        th->blocking -= 1;
+    struct sync_waiter *cur = 0, *next;
+    rb_mutex_t **th_mutex = &th->keeping_mutexes;
+    VALUE notify = 0;
 
-	mutex->fiber = 0;
-	list_for_each_safe(&mutex->waitq, cur, next, node) {
-	    list_del_init(&cur->node);
-	    switch (cur->th->status) {
-	      case THREAD_RUNNABLE: /* from someone else calling Thread#run */
-	      case THREAD_STOPPED_FOREVER: /* likely (rb_mutex_lock) */
-		rb_threadptr_interrupt(cur->th);
-		goto found;
-	      case THREAD_STOPPED: /* probably impossible */
-		rb_bug("unexpected THREAD_STOPPED");
-	      case THREAD_KILLED:
+    // th->blocking -= 1;
+
+    mutex->fiber = 0;
+    list_for_each_safe(&mutex->waitq, cur, next, node) {
+        list_del_init(&cur->node);
+        if (cur->th == th) {
+            notify = self;
+            break;
+        } else {
+            switch (cur->th->status) {
+              case THREAD_RUNNABLE: /* from someone else calling Thread#run */
+              case THREAD_STOPPED_FOREVER: /* likely (rb_mutex_lock) */
+                rb_threadptr_interrupt(cur->th);
+              case THREAD_STOPPED: /* probably impossible */
+                rb_bug("unexpected THREAD_STOPPED");
+              case THREAD_KILLED:
                 /* not sure about this, possible in exit GC? */
-		rb_bug("unexpected THREAD_KILLED");
-		continue;
-	    }
-	}
-      found:
-	while (*th_mutex != mutex) {
-	    th_mutex = &(*th_mutex)->next_mutex;
-	}
-	*th_mutex = mutex->next_mutex;
-	mutex->next_mutex = NULL;
+                rb_bug("unexpected THREAD_KILLED");
+            }
+            break;
+        }
+    }
+
+    // remove from th->keeping_mutexes
+    while (*th_mutex != mutex) {
+        th_mutex = &(*th_mutex)->next_mutex;
+    }
+    *th_mutex = mutex->next_mutex;
+    mutex->next_mutex = NULL;
+
+    if (notify) {
+        VALUE scheduler = rb_thread_scheduler_if_nonblocking(th->self);
+        if (scheduler != Qnil) {
+            rb_funcall(scheduler, rb_intern("notify_mutex"), 1, notify);
+        }
     }
 
     return err;
@@ -415,7 +438,7 @@ rb_mutex_unlock(VALUE self)
     rb_mutex_t *mutex = mutex_ptr(self);
     rb_thread_t *th = GET_THREAD();
 
-    err = rb_mutex_unlock_th(mutex, th, GET_EC()->fiber_ptr);
+    err = rb_mutex_unlock_th(self, mutex, th, GET_EC()->fiber_ptr);
     if (err) rb_raise(rb_eThreadError, "%s", err);
 
     return self;
