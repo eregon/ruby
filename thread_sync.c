@@ -402,19 +402,13 @@ rb_mutex_unlock_th(rb_mutex_t *mutex, rb_thread_t *th, rb_fiber_t *fiber)
 
             if (cur->th->scheduler != Qnil) {
                 rb_scheduler_unblock(cur->th->scheduler, cur->self, rb_fiberptr_self(cur->fiber));
+            }
+
+            if (cur->th->status == THREAD_KILLED) {
+                rb_bug("unexpected THREAD_KILLED");
             } else {
-                switch (cur->th->status) {
-                  case THREAD_RUNNABLE: /* from someone else calling Thread#run */
-                  case THREAD_STOPPED_FOREVER: /* likely (rb_mutex_lock) */
-                    rb_threadptr_interrupt(cur->th);
-                    goto found;
-                  case THREAD_STOPPED: /* probably impossible */
-                    rb_bug("unexpected THREAD_STOPPED");
-                  case THREAD_KILLED:
-                    /* not sure about this, possible in exit GC? */
-                    rb_bug("unexpected THREAD_KILLED");
-                    continue;
-                }
+                rb_threadptr_interrupt(cur->th);
+                goto found;
             }
 	}
       found:
