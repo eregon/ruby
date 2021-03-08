@@ -86,7 +86,8 @@ REPOSITORIES = {
 def sync_default_gems(gem)
   puts "Sync #{REPOSITORIES[gem.to_sym]}"
 
-  upstream = File.join("..", "..", REPOSITORIES[gem.to_sym])
+  upstream = File.join("..", "..", File.basename(REPOSITORIES[gem.to_sym]))
+  p upstream
 
   case gem
   when "rubygems"
