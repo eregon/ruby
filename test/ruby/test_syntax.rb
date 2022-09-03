@@ -43,7 +43,9 @@ class TestSyntax < Test::Unit::TestCase
     Encoding.list.each do |enc|
       next if enc.ascii_compatible?
       make_tmpsrc(f, "# -*- coding: #{enc.name} -*-")
-      assert_raise(ArgumentError, enc.name) {load(f.path)}
+      EnvUtil.suppress_warning do # for UTF-16/32
+        assert_raise(ArgumentError, enc.name) {load(f.path)}
+      end
     end
   ensure
     f&.close!

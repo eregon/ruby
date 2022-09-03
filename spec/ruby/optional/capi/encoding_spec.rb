@@ -436,8 +436,8 @@ describe "C-API Encoding function" do
     end
 
     it "returns the index of the dummy encoding of an Object" do
-      index = Encoding.list.index(Encoding::UTF_16)
-      @s.rb_to_encoding_index(Encoding::UTF_16.name).should == index
+      index = Encoding.list.index(Encoding::IBM037)
+      @s.rb_to_encoding_index(Encoding::IBM037.name).should == index
     end
 
     it "calls #to_str to convert the argument to a String" do

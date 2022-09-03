@@ -1179,18 +1179,22 @@ class TestTranscode < Test::Unit::TestCase
   end
 
   def test_utf_16_bom
-    expected = "\u{3042}\u{3044}\u{20bb7}"
-    assert_equal(expected, %w/fffe4230443042d8b7df/.pack("H*").encode("UTF-8","UTF-16"))
-    check_both_ways(expected, %w/feff30423044d842dfb7/.pack("H*"), "UTF-16")
-    assert_raise(Encoding::InvalidByteSequenceError){%w/feffdfb7/.pack("H*").encode("UTF-8","UTF-16")}
-    assert_raise(Encoding::InvalidByteSequenceError){%w/fffeb7df/.pack("H*").encode("UTF-8","UTF-16")}
+    EnvUtil.suppress_warning do
+      expected = "\u{3042}\u{3044}\u{20bb7}"
+      assert_equal(expected, %w/fffe4230443042d8b7df/.pack("H*").encode("UTF-8","UTF-16"))
+      check_both_ways(expected, %w/feff30423044d842dfb7/.pack("H*"), "UTF-16")
+      assert_raise(Encoding::InvalidByteSequenceError){%w/feffdfb7/.pack("H*").encode("UTF-8","UTF-16")}
+      assert_raise(Encoding::InvalidByteSequenceError){%w/fffeb7df/.pack("H*").encode("UTF-8","UTF-16")}
+    end
   end
 
   def test_utf_32_bom
-    expected = "\u{3042}\u{3044}\u{20bb7}"
-    assert_equal(expected, %w/fffe00004230000044300000b70b0200/.pack("H*").encode("UTF-8","UTF-32"))
-    check_both_ways(expected, %w/0000feff000030420000304400020bb7/.pack("H*"), "UTF-32")
-    assert_raise(Encoding::InvalidByteSequenceError){%w/0000feff00110000/.pack("H*").encode("UTF-8","UTF-32")}
+    EnvUtil.suppress_warning do
+      expected = "\u{3042}\u{3044}\u{20bb7}"
+      assert_equal(expected, %w/fffe00004230000044300000b70b0200/.pack("H*").encode("UTF-8","UTF-32"))
+      check_both_ways(expected, %w/0000feff000030420000304400020bb7/.pack("H*"), "UTF-32")
+      assert_raise(Encoding::InvalidByteSequenceError){%w/0000feff00110000/.pack("H*").encode("UTF-8","UTF-32")}
+    end
   end
 
   def check_utf_32_both_ways(utf8, raw)
@@ -2235,8 +2239,10 @@ class TestTranscode < Test::Unit::TestCase
   bug8940 = '[ruby-core:57318] [Bug #8940]'
   %w[UTF-32 UTF-16].each do |enc|
     define_method("test_pseudo_encoding_inspect(#{enc})") do
-      assert_normal_exit("'aaa'.encode('#{enc}').inspect", bug8940)
-      assert_equal(4, 'aaa'.encode(enc).length, "should count in #{enc} with BOM")
+      EnvUtil.suppress_warning do
+        assert_normal_exit("'aaa'.encode('#{enc}').inspect", bug8940)
+        assert_equal(4, 'aaa'.encode(enc).length, "should count in #{enc} with BOM")
+      end
     end
   end
 
@@ -2253,6 +2259,7 @@ class TestTranscode < Test::Unit::TestCase
     bug9314 = '[ruby-core:59354] [Bug #9314]'
     assert_separately(%W[- -- #{bug9314}], "#{<<~"begin;"}\n#{<<~'end;'}")
     begin;
+      Warning[:deprecated] = false
       bug = ARGV.shift
       result = assert_nothing_raised(TypeError, bug) {break "test".encode(Encoding::UTF_16)}
       assert_equal("\xFE\xFF\x00t\x00e\x00s\x00t", result.b, bug)

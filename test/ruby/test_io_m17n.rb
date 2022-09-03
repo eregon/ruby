@@ -120,7 +120,7 @@ EOT
             assert_equal(Encoding::ASCII_8BIT, f.external_encoding)
             assert_equal(nil, f.internal_encoding)
           }
-          open("tmp", "r:ascii-8bit:utf-16") {|f|
+          open("tmp", "r:ascii-8bit:utf-16be") {|f|
             assert_equal(Encoding::ASCII_8BIT, f.external_encoding)
             assert_equal(nil, f.internal_encoding)
           }
@@ -134,7 +134,7 @@ EOT
             assert_equal(Encoding::ASCII_8BIT, f.external_encoding)
             assert_equal(nil, f.internal_encoding)
           }
-          open("tmp", "r:ascii-8bit:utf-16") {|f|
+          open("tmp", "r:ascii-8bit:utf-16be") {|f|
             assert_equal(Encoding::ASCII_8BIT, f.external_encoding)
             assert_equal(nil, f.internal_encoding)
           }

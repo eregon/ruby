@@ -906,6 +906,14 @@ rb_enc_find_index(const char *name)
             return 0;
         }
     }
+
+    if (i == ENCINDEX_UTF_16) {
+        rb_warn_deprecated_to_remove("3.3", "the UTF-16 dummy encoding", "UTF-16BE/UTF-16LE");
+    }
+    else if (i == ENCINDEX_UTF_32) {
+        rb_warn_deprecated_to_remove("3.3", "the UTF-32 dummy encoding", "UTF-32BE/UTF-32LE");
+    }
+
     return i;
 }
 

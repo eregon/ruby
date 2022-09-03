@@ -179,16 +179,20 @@ class CGIUtilTest < Test::Unit::TestCase
 
   Encoding.list.each do |enc|
     begin
-      escaped = "&#39;&amp;&quot;&gt;&lt;".encode(enc)
-      unescaped = "'&\"><".encode(enc)
+      escaped = EnvUtil.suppress_warning { "&#39;&amp;&quot;&gt;&lt;".encode(enc) }
+      unescaped = EnvUtil.suppress_warning { "'&\"><".encode(enc) }
     rescue Encoding::ConverterNotFoundError
       next
     else
       define_method("test_cgi_escapeHTML:#{enc.name}") do
-        assert_equal(escaped, CGI.escapeHTML(unescaped))
+        EnvUtil.suppress_warning do # for UTF-16/32
+          assert_equal(escaped, CGI.escapeHTML(unescaped))
+        end
       end
       define_method("test_cgi_unescapeHTML:#{enc.name}") do
-        assert_equal(unescaped, CGI.unescapeHTML(escaped))
+        EnvUtil.suppress_warning do # for UTF-16/32
+          assert_equal(unescaped, CGI.unescapeHTML(escaped))
+        end
       end
     end
   end

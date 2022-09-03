@@ -280,8 +280,8 @@ describe "IO#gets" do
   it "transcodes into the IO object's internal encoding, when set" do
     Encoding.default_internal = Encoding::US_ASCII
     @io = new_io @name, 'r'
-    @io.set_encoding Encoding::UTF_8, Encoding::UTF_16
-    @io.gets.encoding.should == Encoding::UTF_16
+    @io.set_encoding Encoding::UTF_8, Encoding::UTF_16BE
+    @io.gets.encoding.should == Encoding::UTF_16BE
   end
 
   it "overwrites the default external encoding with the IO object's own external encoding" do

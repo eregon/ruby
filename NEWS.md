@@ -98,6 +98,8 @@ Note: We're only listing outstanding class updates.
 
 * Encoding
     * Encoding#replicate has been deprecated and will be removed in 3.3. [[Feature #18949]]
+    * The dummy encodings `Encoding::UTF_16` and `Encoding::UTF_32` have been deprecated and will be removed in 3.3.
+      Use `Encoding::UTF_16BE`/`UTF_16LE` and `Encoding::UTF_32BE`/`UTF_32LE` instead. [[Feature #18949]]
 
 * Enumerator
     * Enumerator.product has been added.  Enumerator::Product is the implementation. [[Feature #18685]]

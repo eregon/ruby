@@ -1,4 +1,5 @@
 require_relative '../../../spec_helper'
+require_relative '../fixtures/classes'
 
 describe :encoding_name, shared: true do
   it "returns a String" do
@@ -9,7 +10,7 @@ describe :encoding_name, shared: true do
 
   it "uniquely identifies an encoding" do
     Encoding.list.each do |e|
-      e.should == Encoding.find(e.send(@method))
+      e.should == EncodingSpecs.find(e.send(@method))
     end
   end
 end

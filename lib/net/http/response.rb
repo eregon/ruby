@@ -360,7 +360,7 @@ class Net::HTTPResponse
 
       charset = Encoding.find(charset) rescue nil
       return unless charset
-      charset = Encoding::UTF_8 if charset == Encoding::UTF_16
+      charset = Encoding::UTF_8 if charset.dummy? and charset.name == 'UTF-16'
       return charset # tentative
     end
     nil

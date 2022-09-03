@@ -8,12 +8,14 @@ class TestEncoding < Test::Unit::TestCase
     encodings = Encoding.list
     assert_equal(encodings.empty?, false)
 
-    encodings.each do |e|
-      assert_equal(e, Encoding.find(e.name))
-      assert_equal(e, Encoding.find(e.name.upcase))
-      assert_equal(e, Encoding.find(e.name.capitalize))
-      assert_equal(e, Encoding.find(e.name.downcase))
-      assert_equal(e, Encoding.find(e))
+    EnvUtil.suppress_warning do # for UTF-16/32
+      encodings.each do |e|
+        assert_equal(e, Encoding.find(e.name))
+        assert_equal(e, Encoding.find(e.name.upcase))
+        assert_equal(e, Encoding.find(e.name.capitalize))
+        assert_equal(e, Encoding.find(e.name.downcase))
+        assert_equal(e, Encoding.find(e))
+      end
     end
   end
 
@@ -33,7 +35,9 @@ class TestEncoding < Test::Unit::TestCase
     encodings.each do |e|
       assert_raise(TypeError) { e.dup }
       assert_raise(TypeError) { e.clone }
-      assert_equal(e.object_id, Marshal.load(Marshal.dump(e)).object_id)
+      EnvUtil.suppress_warning do # for UTF-16/32
+        assert_equal(e.object_id, Marshal.load(Marshal.dump(e)).object_id)
+      end
     end
   end
 

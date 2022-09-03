@@ -88,7 +88,7 @@ describe :array_inspect, shared: true do
     end
 
     it "use US-ASCII encoding if the default external encoding is not ascii compatible" do
-      Encoding.default_external = Encoding.find('UTF-32')
+      Encoding.default_external = Encoding::UTF_32BE
 
       utf8 = "utf8".encode("UTF-8")
       jp   = "jp".encode("EUC-JP")

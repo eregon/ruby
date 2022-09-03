@@ -15,6 +15,7 @@ class Test_StrEncAssociate < Test::Unit::TestCase
     enc = enc.name.tr('-', '_')
     define_method("test_dummy_encoding_index_#{enc}") do
       assert_separately(["-r-test-/string", "-", enc], <<-"end;") #do
+        Warning[:deprecated] = false
         enc = Encoding.const_get(ARGV[0])
         index = Bug::String.encoding_index(enc)
         assert(index < 0xffff, "<%#x> expected but was\n<%#x>" % [index & 0xffff, index])

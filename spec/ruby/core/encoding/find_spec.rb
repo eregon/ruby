@@ -1,4 +1,5 @@
 require_relative '../../spec_helper'
+require_relative 'fixtures/classes'
 
 describe "Encoding.find" do
   before :all do
@@ -27,7 +28,7 @@ describe "Encoding.find" do
 
   it "accepts encoding names as Strings" do
     Encoding.list.each do |enc|
-      Encoding.find(enc.name).should == enc
+      EncodingSpecs.find(enc.name).should == enc
     end
   end
 
@@ -39,7 +40,7 @@ describe "Encoding.find" do
 
     Encoding.list.each do |enc|
       obj.encoding_name = enc.name
-      Encoding.find(obj).should == enc
+      suppress_warning { EncodingSpecs.find(obj) }.should == enc
     end
   end
 

@@ -1,5 +1,15 @@
 # -*- encoding: binary -*-
 module EncodingSpecs
+  # Avoids deprecation warnings on 3.2 for the dummy UTF-16/UTF-32
+  def self.find(name)
+    case name
+    when 'UTF-16', 'UTF-32'
+      suppress_warning { Encoding.find(name) }
+    else
+      Encoding.find(name)
+    end
+  end
+
   class UndefinedConversionError
     def self.exception
       ec = Encoding::Converter.new('utf-8','ascii')

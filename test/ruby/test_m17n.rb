@@ -232,14 +232,14 @@ class TestM17N < Test::Unit::TestCase
   bug9415 = '[ruby-dev:47895] [Bug #9415]'
   %w/UTF-16 UTF-32/.each do |enc|
     %w/BE LE/.each do |endian|
-      bom = "\uFEFF".encode("#{enc}#{endian}").force_encoding(enc)
+      bom = EnvUtil.suppress_warning { "\uFEFF".encode("#{enc}#{endian}").force_encoding(enc) }
 
       define_method("test_utf_16_32_inspect(#{enc}#{endian})") do
         s = STR_WITHOUT_BOM.encode(enc + endian)
         # When a UTF-16/32 string doesn't have a BOM,
         # inspect as a dummy encoding string.
         assert_equal(s.dup.force_encoding("ISO-2022-JP").inspect,
-                     s.dup.force_encoding(enc).inspect)
+                     EnvUtil.suppress_warning { s.dup.force_encoding(enc).inspect })
         assert_normal_exit("#{bom.b.dump}.force_encoding('#{enc}').inspect", bug8940)
       end
 
@@ -256,24 +256,28 @@ class TestM17N < Test::Unit::TestCase
         # When a UTF-16/32 string has a BOM,
         # inspect as a particular encoding string.
         assert_equal(s.inspect,
-                     s.dup.force_encoding(enc).inspect)
+                     EnvUtil.suppress_warning { s.dup.force_encoding(enc).inspect })
       end
     end
   end
 
   def test_utf_without_bom_asciionly
-    bug10598 = '[ruby-core:66835] [Bug #10598]'
-    encs = [Encoding::UTF_16, Encoding::UTF_32].find_all {|enc|
-      "abcd".force_encoding(enc).ascii_only?
-    }
-    assert_empty(encs, bug10598)
+    EnvUtil.suppress_warning do
+      bug10598 = '[ruby-core:66835] [Bug #10598]'
+      encs = [Encoding::UTF_16, Encoding::UTF_32].find_all {|enc|
+        "abcd".force_encoding(enc).ascii_only?
+      }
+      assert_empty(encs, bug10598)
+    end
   end
 
   def test_utf_without_bom_valid
-    encs = [Encoding::UTF_16, Encoding::UTF_32].find_all {|enc|
-      !(+"abcd").encode!(enc).force_encoding(enc).valid_encoding?
-    }
-    assert_empty(encs)
+    EnvUtil.suppress_warning do
+      encs = [Encoding::UTF_16, Encoding::UTF_32].find_all {|enc|
+        !(+"abcd").encode!(enc).force_encoding(enc).valid_encoding?
+      }
+      assert_empty(encs)
+    end
   end
 
   def test_object_utf16_32_inspect

@@ -2772,8 +2772,18 @@ rb_const_warn_if_deprecated(const rb_const_entry_t *ce, VALUE klass, ID id)
             rb_category_warn(RB_WARN_CATEGORY_DEPRECATED, "constant ::%"PRIsVALUE" is deprecated", QUOTE_ID(id));
         }
         else {
-            rb_category_warn(RB_WARN_CATEGORY_DEPRECATED, "constant %"PRIsVALUE"::%"PRIsVALUE" is deprecated",
-                    rb_class_name(klass), QUOTE_ID(id));
+            if (klass == rb_cEncoding && id == rb_intern("UTF_16")) {
+                rb_category_warn(RB_WARN_CATEGORY_DEPRECATED,
+                        "constant Encoding::UTF_16 is deprecated: use Encoding::UTF_16BE/Encoding::UTF_16LE instead");
+            }
+            else if (klass == rb_cEncoding && id == rb_intern("UTF_32")) {
+                rb_category_warn(RB_WARN_CATEGORY_DEPRECATED,
+                        "constant Encoding::UTF_32 is deprecated: use Encoding::UTF_32BE/Encoding::UTF_32LE instead");
+            }
+            else {
+                rb_category_warn(RB_WARN_CATEGORY_DEPRECATED, "constant %"PRIsVALUE"::%"PRIsVALUE" is deprecated",
+                        rb_class_name(klass), QUOTE_ID(id));
+            }
         }
     }
 }

@@ -15,10 +15,10 @@ class JSONParserTest < Test::Unit::TestCase
   end
 
   def test_argument_encoding
-    source = "{}".encode("UTF-16")
+    source = "{}".encode("UTF-16BE")
     JSON::Parser.new(source)
-    assert_equal Encoding::UTF_16, source.encoding
-  end if defined?(Encoding::UTF_16)
+    assert_equal Encoding::UTF_16BE, source.encoding
+  end if defined?(Encoding::UTF_16BE)
 
   def test_error_message_encoding
     bug10705 = '[ruby-core:67386] [Bug #10705]'

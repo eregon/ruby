@@ -363,7 +363,7 @@ if defined?(WIN32OLE)
         file = fso.opentextfile(fname, 2, true)
         test_str = [0x3042].pack("U*").encode("UTF-16LE")
         begin
-          file.write test_str.force_encoding("UTF-16")
+          file.write test_str.force_encoding("binary")
         ensure
           file.close
         end
@@ -382,7 +382,7 @@ if defined?(WIN32OLE)
           WIN32OLE.codepage = cp
           file = fso.opentextfile(fname, 2, true)
           begin
-            file.write [164, 162].pack("c*").force_encoding("UTF-16")
+            file.write [164, 162].pack("c*")
           ensure
             file.close
           end

@@ -23,4 +23,6 @@ void
 Init_encdb(void)
 {
 #include "encdb.h"
+    rb_deprecate_constant(rb_cEncoding, "UTF_16");
+    rb_deprecate_constant(rb_cEncoding, "UTF_32");
 }
