@@ -590,6 +590,10 @@ if defined?(RubyVM::AbstractSyntaxTree)
 
     def pretty_print(q)
       q.group(1, "(#{type}@#{first_lineno}:#{first_column}-#{last_lineno}:#{last_column}", ")") {
+        if self.inspect.include?("[Li]>")
+          q.text "[Li]"
+        end
+
         case type
         when :SCOPE
           pretty_print_children(q, %w"tbl args body")

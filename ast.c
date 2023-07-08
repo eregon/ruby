@@ -744,10 +744,14 @@ ast_node_inspect(rb_execution_context_t *ec, VALUE self)
     str = rb_str_new2("#<");
 
     rb_str_append(str, cname);
-    rb_str_catf(str, ":%s@%d:%d-%d:%d>",
+    rb_str_catf(str, ":%s@%d:%d-%d:%d",
                 node_type_to_str(data->node),
                 nd_first_lineno(data->node), nd_first_column(data->node),
                 nd_last_lineno(data->node), nd_last_column(data->node));
+    if (data->node->flags & NODE_FL_NEWLINE) {
+        rb_str_catf(str, " [Li]");
+    }
+    rb_str_catf(str, ">");
 
     return str;
 }
