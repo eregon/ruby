@@ -384,7 +384,9 @@ module SyncDefaultGems
     config = REPOSITORIES[gem]
     puts "Sync #{config.upstream}"
 
-    upstream = File.join("..", "..", config.upstream)
+    upstream = File.join("..", "..", File.basename(config.upstream))
+    p upstream
+    p File.expand_path(upstream)
 
     config.mappings.each do |src, dst|
       rm_rf(dst)
