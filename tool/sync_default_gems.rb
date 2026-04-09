@@ -126,7 +126,9 @@ module SyncDefaultGems
     repo, = REPOSITORIES[gem]
     puts "Sync #{repo}"
 
-    upstream = File.join("..", "..", repo)
+    upstream = File.join("..", "..", File.basename(repo))
+    p upstream
+    p File.expand_path(upstream)
 
     case gem
     when "rubygems"
