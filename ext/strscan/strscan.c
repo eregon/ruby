@@ -22,7 +22,15 @@ extern size_t onig_region_memsize(const struct re_registers *regs);
 
 #include <stdbool.h>
 
-#define STRSCAN_VERSION "3.1.2"
+#define STRSCAN_VERSION "3.1.8"
+
+
+#ifdef HAVE_RB_DEPRECATE_CONSTANT
+/* In ruby 3.0, defined but exposed in external headers */
+extern void rb_deprecate_constant(VALUE mod, const char *name);
+#else
+# define rb_deprecate_constant(mod, name) ((void)0)
+#endif
 
 /* =======================================================================
                          Data Type Definitions
@@ -30,7 +38,6 @@ extern size_t onig_region_memsize(const struct re_registers *regs);
 
 static VALUE StringScanner;
 static VALUE ScanError;
-static ID id_byteslice;
 
 static int usascii_encindex, utf8_encindex, binary_encindex;
 
@@ -58,8 +65,13 @@ struct strscanner
 };
 
 #define MATCHED_P(s)          ((s)->flags & FLAG_MATCHED)
-#define MATCHED(s)             (s)->flags |= FLAG_MATCHED
-#define CLEAR_MATCH_STATUS(s)  (s)->flags &= ~FLAG_MATCHED
+#define MATCHED(s)            ((s)->flags |= FLAG_MATCHED)
+#define CLEAR_MATCHED(s)      ((s)->flags &= ~FLAG_MATCHED)
+#define CLEAR_NAMED_CAPTURES(s) ((s)->regex = Qnil)
+#define CLEAR_MATCH_STATUS(s) do {\
+    CLEAR_MATCHED(s);\
+    CLEAR_NAMED_CAPTURES(s);\
+} while (0)
 
 #define S_PBEG(s)  (RSTRING_PTR((s)->str))
 #define S_LEN(s)  (RSTRING_LEN((s)->str))
@@ -92,7 +104,6 @@ static VALUE strscan_init_copy _((VALUE vself, VALUE vorig));
 
 static VALUE strscan_s_mustc _((VALUE self));
 static VALUE strscan_terminate _((VALUE self));
-static VALUE strscan_clear _((VALUE self));
 static VALUE strscan_get_string _((VALUE self));
 static VALUE strscan_set_string _((VALUE self, VALUE str));
 static VALUE strscan_concat _((VALUE self, VALUE str));
@@ -114,14 +125,11 @@ static VALUE strscan_search_full _((VALUE self, VALUE re,
 static void adjust_registers_to_matched _((struct strscanner *p));
 static VALUE strscan_getch _((VALUE self));
 static VALUE strscan_get_byte _((VALUE self));
-static VALUE strscan_getbyte _((VALUE self));
 static VALUE strscan_peek _((VALUE self, VALUE len));
-static VALUE strscan_peep _((VALUE self, VALUE len));
 static VALUE strscan_scan_base10_integer _((VALUE self));
 static VALUE strscan_unscan _((VALUE self));
 static VALUE strscan_bol_p _((VALUE self));
 static VALUE strscan_eos_p _((VALUE self));
-static VALUE strscan_empty_p _((VALUE self));
 static VALUE strscan_rest_p _((VALUE self));
 static VALUE strscan_matched_p _((VALUE self));
 static VALUE strscan_matched _((VALUE self));
@@ -174,12 +182,35 @@ extract_beg_len(struct strscanner *p, long beg_i, long len)
                                Constructor
    ======================================================================= */
 
+#ifdef RUBY_TYPED_EMBEDDABLE
+#  define HAVE_RUBY_TYPED_EMBEDDABLE 1
+#else
+# ifdef HAVE_CONST_RUBY_TYPED_EMBEDDABLE
+#  define RUBY_TYPED_EMBEDDABLE RUBY_TYPED_EMBEDDABLE
+#  define HAVE_RUBY_TYPED_EMBEDDABLE 1
+# else
+#  define RUBY_TYPED_EMBEDDABLE 0
+# endif
+#endif
+
+#ifdef HAVE_RB_GC_LOCATION
+static void
+strscan_compact(void *ptr)
+{
+    struct strscanner *p = ptr;
+    p->str = rb_gc_location(p->str);
+    p->regex = rb_gc_location(p->regex);
+}
+#else
+#define rb_gc_mark_movable rb_gc_mark
+#endif
+
 static void
 strscan_mark(void *ptr)
 {
     struct strscanner *p = ptr;
-    rb_gc_mark(p->str);
-    rb_gc_mark(p->regex);
+    rb_gc_mark_movable(p->str);
+    rb_gc_mark_movable(p->regex);
 }
 
 static void
@@ -187,24 +218,37 @@ strscan_free(void *ptr)
 {
     struct strscanner *p = ptr;
     onig_region_free(&(p->regs), 0);
+#ifndef HAVE_RUBY_TYPED_EMBEDDABLE
     ruby_xfree(p);
+#endif
 }
 
 static size_t
 strscan_memsize(const void *ptr)
 {
-    const struct strscanner *p = ptr;
-    size_t size = sizeof(*p) - sizeof(p->regs);
+    size_t size = 0;
+#ifndef HAVE_RUBY_TYPED_EMBEDDABLE
+    size += sizeof(struct strscanner);
+#endif
+
 #ifdef HAVE_ONIG_REGION_MEMSIZE
-    size += onig_region_memsize(&p->regs);
+    const struct strscanner *p = ptr;
+    size += onig_region_memsize(&p->regs) - sizeof(p->regs);
 #endif
     return size;
 }
 
 static const rb_data_type_t strscanner_type = {
-    "StringScanner",
-    {strscan_mark, strscan_free, strscan_memsize},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    .wrap_struct_name = "StringScanner",
+    .function = {
+        .dmark = strscan_mark,
+        .dfree = strscan_free,
+        .dsize = strscan_memsize,
+#ifdef HAVE_RB_GC_LOCATION
+        .dcompact = strscan_compact,
+#endif
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED | RUBY_TYPED_EMBEDDABLE
 };
 
 static VALUE
@@ -216,7 +260,6 @@ strscan_s_allocate(VALUE klass)
     CLEAR_MATCH_STATUS(p);
     onig_region_init(&(p->regs));
     p->str = Qnil;
-    p->regex = Qnil;
     return obj;
 }
 
@@ -269,7 +312,7 @@ strscan_initialize(int argc, VALUE *argv, VALUE self)
         p->fixed_anchor_p = false;
     }
     StringValue(str);
-    p->str = str;
+    RB_OBJ_WRITE(self, &p->str, str);
 
     return self;
 }
@@ -299,7 +342,7 @@ strscan_init_copy(VALUE vself, VALUE vorig)
     orig = check_strscan(vorig);
     if (self != orig) {
 	self->flags = orig->flags;
-	self->str = orig->str;
+	RB_OBJ_WRITE(vself, &self->str, orig->str);
 	self->prev = orig->prev;
 	self->curr = orig->curr;
 	if (rb_reg_region_copy(&self->regs, &orig->regs))
@@ -382,21 +425,6 @@ strscan_terminate(VALUE self)
 }
 
 /*
- * call-seq:
- *   clear -> self
- *
- * This method is obsolete; use the equivalent method StringScanner#terminate.
- */
-
- /* :nodoc: */
-static VALUE
-strscan_clear(VALUE self)
-{
-    rb_warning("StringScanner#clear is obsolete; use #terminate instead");
-    return strscan_terminate(self);
-}
-
-/*
  * :markup: markdown
  * :include: strscan/link_refs.txt
  *
@@ -463,7 +491,7 @@ strscan_set_string(VALUE self, VALUE str)
     struct strscanner *p = check_strscan(self);
 
     StringValue(str);
-    p->str = str;
+    RB_OBJ_WRITE(self, &p->str, str);
     p->curr = 0;
     CLEAR_MATCH_STATUS(p);
     return str;
@@ -520,7 +548,7 @@ strscan_get_pos(VALUE self)
     struct strscanner *p;
 
     GET_SCANNER(self, p);
-    return INT2FIX(p->curr);
+    return LONG2NUM(p->curr);
 }
 
 /*
@@ -550,7 +578,7 @@ strscan_set_pos(VALUE self, VALUE v)
     long i;
 
     GET_SCANNER(self, p);
-    i = NUM2INT(v);
+    i = NUM2LONG(v);
     if (i < 0) i += S_LEN(p);
     if (i < 0) rb_raise(rb_eRangeError, "index out of range");
     if (i > S_LEN(p)) rb_raise(rb_eRangeError, "index out of range");
@@ -571,19 +599,20 @@ match_target(struct strscanner *p)
 }
 
 static inline void
-set_registers(struct strscanner *p, size_t length)
+set_registers(struct strscanner *p, size_t pos, size_t length)
 {
     const int at = 0;
     OnigRegion *regs = &(p->regs);
     onig_region_clear(regs);
     if (onig_region_set(regs, at, 0, 0)) return;
     if (p->fixed_anchor_p) {
-        regs->beg[at] = p->curr;
-        regs->end[at] = p->curr + length;
+        regs->beg[at] = pos + p->curr;
+        regs->end[at] = pos + p->curr + length;
     }
     else
     {
-        regs->end[at] = length;
+        regs->beg[at] = pos;
+        regs->end[at] = pos + length;
     }
 }
 
@@ -707,7 +736,7 @@ strscan_do_scan(VALUE self, VALUE pattern, int succptr, int getstr, int headonly
 
     if (RB_TYPE_P(pattern, T_REGEXP)) {
         OnigPosition ret;
-        p->regex = pattern;
+        RB_OBJ_WRITE(self, &p->regex, pattern);
         ret = rb_reg_onig_match(p->regex,
                                 p->str,
                                 headonly ? strscan_match : strscan_search,
@@ -731,7 +760,7 @@ strscan_do_scan(VALUE self, VALUE pattern, int succptr, int getstr, int headonly
             if (memcmp(CURPTR(p), RSTRING_PTR(pattern), RSTRING_LEN(pattern)) != 0) {
                 return Qnil;
             }
-            set_registers(p, RSTRING_LEN(pattern));
+            set_registers(p, 0, RSTRING_LEN(pattern));
         }
         else {
             rb_encoding *enc = rb_enc_check(p->str, pattern);
@@ -740,7 +769,7 @@ strscan_do_scan(VALUE self, VALUE pattern, int succptr, int getstr, int headonly
             if (pos == -1) {
                 return Qnil;
             }
-            set_registers(p, RSTRING_LEN(pattern) + pos);
+            set_registers(p, pos, RSTRING_LEN(pattern));
         }
     }
 
@@ -1214,22 +1243,6 @@ strscan_get_byte(VALUE self)
 }
 
 /*
- * call-seq:
- *   getbyte
- *
- * Equivalent to #get_byte.
- * This method is obsolete; use #get_byte instead.
- */
-
- /* :nodoc: */
-static VALUE
-strscan_getbyte(VALUE self)
-{
-    rb_warning("StringScanner#getbyte is obsolete; use #get_byte instead");
-    return strscan_get_byte(self);
-}
-
-/*
  * :markup: markdown
  * :include: strscan/link_refs.txt
  *
@@ -1264,22 +1277,6 @@ strscan_peek(VALUE self, VALUE vlen)
     return extract_beg_len(p, p->curr, len);
 }
 
-/*
- * call-seq:
- *   peep
- *
- * Equivalent to #peek.
- * This method is obsolete; use #peek instead.
- */
-
- /* :nodoc: */
-static VALUE
-strscan_peep(VALUE self, VALUE vlen)
-{
-    rb_warning("StringScanner#peep is obsolete; use #peek instead");
-    return strscan_peek(self, vlen);
-}
-
 static VALUE
 strscan_parse_integer(struct strscanner *p, int base, long len)
 {
@@ -1292,20 +1289,25 @@ strscan_parse_integer(struct strscanner *p, int base, long len)
     integer = rb_cstr2inum(buffer, base);
     RB_ALLOCV_END(buffer_v);
     p->curr += len;
+
+    MATCHED(p);
+    adjust_registers_to_matched(p);
+
     return integer;
 }
 
 static inline bool
-strscan_ascii_compat_fastpath(VALUE str) {
+strscan_ascii_compat_fastpath(VALUE str)
+{
     int encindex = ENCODING_GET_INLINED(str);
-    // The overwhelming majority of strings are in one of these 3 encodings.
+    /* The overwhelming majority of strings are in one of these 3 encodings. */
     return encindex == utf8_encindex || encindex == binary_encindex || encindex == usascii_encindex;
 }
 
 static inline void
 strscan_must_ascii_compat(VALUE str)
 {
-    // The overwhelming majority of strings are in one of these 3 encodings.
+    /* The overwhelming majority of strings are in one of these 3 encodings. */
     if (RB_LIKELY(strscan_ascii_compat_fastpath(str))) {
         return;
     }
@@ -1313,11 +1315,12 @@ strscan_must_ascii_compat(VALUE str)
     rb_must_asciicompat(str);
 }
 
+/* :nodoc: */
 static VALUE
 strscan_scan_base10_integer(VALUE self)
 {
     char *ptr;
-    long len = 0;
+    long len = 0, remaining_len;
     struct strscanner *p;
 
     GET_SCANNER(self, p);
@@ -1327,7 +1330,7 @@ strscan_scan_base10_integer(VALUE self)
 
     ptr = CURPTR(p);
 
-    long remaining_len = S_RESTLEN(p);
+    remaining_len = S_RESTLEN(p);
 
     if (remaining_len <= 0) {
         return Qnil;
@@ -1341,7 +1344,6 @@ strscan_scan_base10_integer(VALUE self)
         return Qnil;
     }
 
-    MATCHED(p);
     p->prev = p->curr;
 
     while (len < remaining_len && rb_isdigit(ptr[len])) {
@@ -1351,11 +1353,12 @@ strscan_scan_base10_integer(VALUE self)
     return strscan_parse_integer(p, 10, len);
 }
 
+/* :nodoc: */
 static VALUE
 strscan_scan_base16_integer(VALUE self)
 {
     char *ptr;
-    long len = 0;
+    long len = 0, remaining_len;
     struct strscanner *p;
 
     GET_SCANNER(self, p);
@@ -1365,7 +1368,7 @@ strscan_scan_base16_integer(VALUE self)
 
     ptr = CURPTR(p);
 
-    long remaining_len = S_RESTLEN(p);
+    remaining_len = S_RESTLEN(p);
 
     if (remaining_len <= 0) {
         return Qnil;
@@ -1375,7 +1378,7 @@ strscan_scan_base16_integer(VALUE self)
         len++;
     }
 
-    if ((remaining_len >= (len + 2)) && ptr[len] == '0' && ptr[len + 1] == 'x') {
+    if ((remaining_len >= (len + 3)) && ptr[len] == '0' && ptr[len + 1] == 'x' && rb_isxdigit(ptr[len + 2])) {
         len += 2;
     }
 
@@ -1383,7 +1386,6 @@ strscan_scan_base16_integer(VALUE self)
         return Qnil;
     }
 
-    MATCHED(p);
     p->prev = p->curr;
 
     while (len < remaining_len && rb_isxdigit(ptr[len])) {
@@ -1519,26 +1521,9 @@ strscan_eos_p(VALUE self)
 
 /*
  * call-seq:
- *   empty?
- *
- * Equivalent to #eos?.
- * This method is obsolete, use #eos? instead.
- */
-
- /* :nodoc: */
-static VALUE
-strscan_empty_p(VALUE self)
-{
-    rb_warning("StringScanner#empty? is obsolete; use #eos? instead");
-    return strscan_eos_p(self);
-}
-
-/*
- * call-seq:
  *   rest?
  *
  * Returns true if and only if there is more data in the string.  See #eos?.
- * This method is obsolete; use #eos? instead.
  *
  *   s = StringScanner.new('test string')
  *   # These two are opposites
@@ -1660,19 +1645,17 @@ strscan_matched_size(VALUE self)
 static int
 name_to_backref_number(struct re_registers *regs, VALUE regexp, const char* name, const char* name_end, rb_encoding *enc)
 {
-    int num;
-
-    num = onig_name_to_backref_number(RREGEXP_PTR(regexp),
-	(const unsigned char* )name, (const unsigned char* )name_end, regs);
-    if (num >= 1) {
-	return num;
+    if (RTEST(regexp)) {
+        int num = onig_name_to_backref_number(RREGEXP_PTR(regexp),
+                                              (const unsigned char* )name,
+                                              (const unsigned char* )name_end,
+                                              regs);
+        if (num >= 1) {
+	    return num;
+        }
     }
-    else {
-	rb_enc_raise(enc, rb_eIndexError, "undefined group name reference: %.*s",
-					  rb_long2int(name_end - name), name);
-    }
-
-    UNREACHABLE;
+    rb_enc_raise(enc, rb_eIndexError, "undefined group name reference: %.*s",
+                 rb_long2int(name_end - name), name);
 }
 
 /*
@@ -1761,7 +1744,6 @@ strscan_aref(VALUE self, VALUE idx)
             idx = rb_sym2str(idx);
             /* fall through */
         case T_STRING:
-            if (!RTEST(p->regex)) return Qnil;
             RSTRING_GETMEM(idx, name, i);
             i = name_to_backref_number(&(p->regs), p->regex, name, name + i, rb_enc_get(idx));
             break;
@@ -2049,22 +2031,6 @@ strscan_rest_size(VALUE self)
     return INT2FIX(i);
 }
 
-/*
- * call-seq:
- *   restsize
- *
- * <tt>s.restsize</tt> is equivalent to <tt>s.rest_size</tt>.
- * This method is obsolete; use #rest_size instead.
- */
-
- /* :nodoc: */
-static VALUE
-strscan_restsize(VALUE self)
-{
-    rb_warning("StringScanner#restsize is obsolete; use #rest_size instead");
-    return strscan_rest_size(self);
-}
-
 #define INSPECT_LENGTH 5
 
 /*
@@ -2207,7 +2173,10 @@ named_captures_iter(const OnigUChar *name,
     VALUE value = RUBY_Qnil;
     int i;
     for (i = 0; i < back_num; i++) {
-        value = strscan_aref(data->self, INT2NUM(back_refs[i]));
+        VALUE v = strscan_aref(data->self, INT2NUM(back_refs[i]));
+        if (!RB_NIL_P(v)) {
+            value = v;
+        }
     }
     rb_hash_aset(data->captures, key, value);
     return 0;
@@ -2261,6 +2230,13 @@ strscan_named_captures(VALUE self)
    ======================================================================= */
 
 /*
+ * Document-class: StringScanner::Error
+ *
+ * The error class for StringScanner.
+ * See StringScanner#unscan.
+ */
+
+/*
  * Document-class: StringScanner
  *
  * :markup: markdown
@@ -2280,8 +2256,6 @@ Init_strscan(void)
     ID id_scanerr = rb_intern("ScanError");
     VALUE tmp;
 
-    id_byteslice = rb_intern("byteslice");
-
     usascii_encindex = rb_usascii_encindex();
     utf8_encindex = rb_utf8_encindex();
     binary_encindex = rb_ascii8bit_encindex();
@@ -2290,6 +2264,7 @@ Init_strscan(void)
     ScanError = rb_define_class_under(StringScanner, "Error", rb_eStandardError);
     if (!rb_const_defined(rb_cObject, id_scanerr)) {
 	rb_const_set(rb_cObject, id_scanerr, ScanError);
+	rb_deprecate_constant(rb_cObject, "ScanError");
     }
     tmp = rb_str_new2(STRSCAN_VERSION);
     rb_obj_freeze(tmp);
@@ -2297,6 +2272,7 @@ Init_strscan(void)
     tmp = rb_str_new2("$Id$");
     rb_obj_freeze(tmp);
     rb_const_set(StringScanner, rb_intern("Id"), tmp);
+    rb_deprecate_constant(StringScanner, "Id");
 
     rb_define_alloc_func(StringScanner, strscan_s_allocate);
     rb_define_private_method(StringScanner, "initialize", strscan_initialize, -1);
@@ -2304,7 +2280,6 @@ Init_strscan(void)
     rb_define_singleton_method(StringScanner, "must_C_version", strscan_s_mustc, 0);
     rb_define_method(StringScanner, "reset",       strscan_reset,       0);
     rb_define_method(StringScanner, "terminate",   strscan_terminate,   0);
-    rb_define_method(StringScanner, "clear",       strscan_clear,       0);
     rb_define_method(StringScanner, "string",      strscan_get_string,  0);
     rb_define_method(StringScanner, "string=",     strscan_set_string,  1);
     rb_define_method(StringScanner, "concat",      strscan_concat,      1);
@@ -2329,11 +2304,9 @@ Init_strscan(void)
 
     rb_define_method(StringScanner, "getch",       strscan_getch,       0);
     rb_define_method(StringScanner, "get_byte",    strscan_get_byte,    0);
-    rb_define_method(StringScanner, "getbyte",     strscan_getbyte,     0);
     rb_define_method(StringScanner, "scan_byte",   strscan_scan_byte,   0);
     rb_define_method(StringScanner, "peek",        strscan_peek,        1);
     rb_define_method(StringScanner, "peek_byte",   strscan_peek_byte,   0);
-    rb_define_method(StringScanner, "peep",        strscan_peep,        1);
 
     rb_define_private_method(StringScanner, "scan_base10_integer", strscan_scan_base10_integer, 0);
     rb_define_private_method(StringScanner, "scan_base16_integer", strscan_scan_base16_integer, 0);
@@ -2343,7 +2316,6 @@ Init_strscan(void)
     rb_define_method(StringScanner, "beginning_of_line?", strscan_bol_p, 0);
     rb_alias(StringScanner, rb_intern("bol?"), rb_intern("beginning_of_line?"));
     rb_define_method(StringScanner, "eos?",        strscan_eos_p,       0);
-    rb_define_method(StringScanner, "empty?",      strscan_empty_p,     0);
     rb_define_method(StringScanner, "rest?",       strscan_rest_p,      0);
 
     rb_define_method(StringScanner, "matched?",    strscan_matched_p,   0);
@@ -2358,13 +2330,10 @@ Init_strscan(void)
 
     rb_define_method(StringScanner, "rest",        strscan_rest,        0);
     rb_define_method(StringScanner, "rest_size",   strscan_rest_size,   0);
-    rb_define_method(StringScanner, "restsize",    strscan_restsize,    0);
 
     rb_define_method(StringScanner, "inspect",     strscan_inspect,     0);
 
     rb_define_method(StringScanner, "fixed_anchor?", strscan_fixed_anchor_p, 0);
 
     rb_define_method(StringScanner, "named_captures", strscan_named_captures, 0);
-
-    rb_require("strscan/strscan");
 }
