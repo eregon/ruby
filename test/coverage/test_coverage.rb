@@ -522,11 +522,11 @@ class TestCoverage < Test::Unit::TestCase
   def test_method_coverage_for_define_method
     result = {
       :methods => {
-        [Object, :a, 6, 18, 6, 25] => 2,
-        [Object, :b, 7, 18, 8, 3] => 0,
-        [Object, :bar, 2, 20, 3, 1] => 1,
-        [Object, :baz, 4, 9, 4, 11] => 0,
-        [Object, :foo, 1, 20, 1, 22] => 2,
+        [Object, :a, 6, 0, 6, 25] => 2,
+        [Object, :b, 7, 0, 8, 3] => 0,
+        [Object, :bar, 2, 0, 3, 1] => 1,
+        [Object, :baz, 4, 4, 4, 11] => 0,
+        [Object, :foo, 1, 0, 1, 22] => 2,
       }
     }
     assert_coverage(<<~"end;", { methods: true }, result)

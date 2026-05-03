@@ -1373,6 +1373,12 @@ pm_new_child_iseq(rb_iseq_t *iseq, pm_scope_node_t *node, VALUE name, const rb_i
     return ret_iseq;
 }
 
+static void
+pm_iseq_set_code_location(const rb_iseq_t *iseq, const rb_code_location_t *code_location)
+{
+    ISEQ_BODY(iseq)->location.code_location = *code_location;
+}
+
 static int
 pm_cpath_const_p(const pm_node_t *node)
 {
@@ -3826,6 +3832,8 @@ pm_compile_call(rb_iseq_t *iseq, const pm_call_node_t *call_node, LINK_ANCHOR *c
         pm_scope_node_init(call_node->block, &next_scope_node, scope_node);
 
         block_iseq = NEW_CHILD_ISEQ(&next_scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, pm_node_line_number_cached(call_node->block, scope_node));
+        rb_code_location_t call_code_location = pm_code_location(scope_node, (const pm_node_t *) call_node);
+        pm_iseq_set_code_location(block_iseq, &call_code_location);
         pm_scope_node_destroy(&next_scope_node);
         ISEQ_COMPILE_DATA(iseq)->current_block = block_iseq;
     }

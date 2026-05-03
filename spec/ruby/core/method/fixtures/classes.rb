@@ -1,23 +1,39 @@
 module MethodSpecs
-
-
   class SourceLocation
-    def self.location # This needs to be on this line
-      :location       # for the spec to pass
+    LOCATION_SOURCE_RANGE = [__LINE__ + 1, 4, __LINE__ + 3, 7]
+    def self.location
+      :location
     end
 
     def self.redefined
       :first
     end
 
+    REDEFINED_LINE = __LINE__ + 1
     def self.redefined
       :last
     end
 
+    ORIGINAL_LINE = __LINE__ + 1
     def original
     end
 
     alias :aka :original
+
+    UTF8_SOURCE_RANGE = [__LINE__ + 1, 4, __LINE__ + 1, 22]
+    def été; 42; end
+
+    INLINE_SOURCE_RANGE = [__LINE__ + 1, 4, __LINE__ + 1, 19]
+    def inline = 42
+
+    DEFINE_METHOD_SOURCE_RANGE = [__LINE__ + 1, 4, __LINE__ + 1, 47]
+    define_method(:define_method_method) { 42 }
+
+    MULTILINE_SOURCE_RANGE = [__LINE__ + 1, 4, __LINE__ + 4, 7]
+    def self.multiline
+      1
+      2
+    end
   end
 
   class Methods

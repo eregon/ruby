@@ -1506,6 +1506,12 @@ new_child_iseq(rb_iseq_t *iseq, const NODE *const node,
     return ret_iseq;
 }
 
+static void
+iseq_set_code_location(const rb_iseq_t *iseq, const rb_code_location_t *code_location)
+{
+    ISEQ_BODY(iseq)->location.code_location = *code_location;
+}
+
 static rb_iseq_t *
 new_child_iseq_with_callback(rb_iseq_t *iseq, const struct rb_iseq_new_with_callback_callback_func *ifunc,
                      VALUE name, const rb_iseq_t *parent, enum rb_iseq_type type, int line_no)
@@ -8471,6 +8477,7 @@ compile_iter(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, in
         ISEQ_COMPILE_DATA(iseq)->current_block = child_iseq =
             NEW_CHILD_ISEQ(RNODE_ITER(node)->nd_body, make_name_for_block(iseq),
                            ISEQ_TYPE_BLOCK, line);
+        iseq_set_code_location(child_iseq, nd_code_loc(node));
         CHECK(COMPILE(ret, "iter caller", RNODE_ITER(node)->nd_iter));
     }
 

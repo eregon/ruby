@@ -43,11 +43,179 @@ VALUE rb_cUnboundMethod;
 VALUE rb_cMethod;
 VALUE rb_cBinding;
 VALUE rb_cProc;
+static VALUE rb_cSourceRange;
 
 static rb_block_call_func bmcall;
 static int method_arity(VALUE);
 static int method_min_max_arity(VALUE, int *max);
 static VALUE proc_binding(VALUE self);
+
+struct source_range_data {
+    VALUE path;
+    VALUE absolute_path;
+    int start_line;
+    int start_column;
+    int end_line;
+    int end_column;
+};
+
+static size_t
+source_range_memsize(const void *ptr)
+{
+    return sizeof(struct source_range_data);
+}
+
+RUBY_REFERENCES(source_range_refs) = {
+    RUBY_REF_EDGE(struct source_range_data, path),
+    RUBY_REF_EDGE(struct source_range_data, absolute_path),
+    RUBY_REF_END
+};
+
+static const rb_data_type_t source_range_data_type = {
+    "source_range",
+    {
+        RUBY_REFS_LIST_PTR(source_range_refs),
+        RUBY_TYPED_DEFAULT_FREE,
+        source_range_memsize,
+    },
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED | RUBY_TYPED_DECL_MARKING
+};
+
+static VALUE
+source_range_new(const rb_iseq_t *iseq)
+{
+    if (!iseq) {
+        return Qnil;
+    }
+    rb_iseq_check(iseq);
+
+    VALUE path = rb_iseq_path(iseq);
+    VALUE absolute_path = rb_iseq_realpath(iseq);
+    if (NIL_P(path) && NIL_P(absolute_path)) {
+        return Qnil;
+    }
+
+    int start_line, start_column, end_line, end_column;
+    rb_iseq_code_location(iseq, &start_line, &start_column, &end_line, &end_column);
+
+    struct source_range_data *data;
+    VALUE obj = TypedData_Make_Struct(rb_cSourceRange, struct source_range_data, &source_range_data_type, data);
+    RB_OBJ_WRITE(obj, &data->path, path);
+    RB_OBJ_WRITE(obj, &data->absolute_path, absolute_path);
+    data->start_line = start_line;
+    data->start_column = start_column;
+    data->end_line = end_line;
+    data->end_column = end_column;
+
+    return obj;
+}
+
+static struct source_range_data *
+source_range_data_get(VALUE self)
+{
+    struct source_range_data *data;
+    TypedData_Get_Struct(self, struct source_range_data, &source_range_data_type, data);
+    return data;
+}
+
+/*
+ * call-seq:
+ *    source_range.path  -> String
+ *
+ * Returns the source path for the callable associated with this source range.
+ * This is the same path value returned as the first element of #source_location.
+ */
+static VALUE
+source_range_path(VALUE self)
+{
+    return source_range_data_get(self)->path;
+}
+
+/*
+ * call-seq:
+ *    source_range.absolute_path  -> String or nil
+ *
+ * Returns the absolute source path for the callable associated with this source
+ * range, or +nil+ if the source has no absolute path, such as code evaluated
+ * with an explicit non-file path.
+ */
+static VALUE
+source_range_absolute_path(VALUE self)
+{
+    return source_range_data_get(self)->absolute_path;
+}
+
+/*
+ * call-seq:
+ *    source_range.start_line  -> Integer
+ *
+ * Returns the 1-indexed line number where this source range starts.
+ */
+static VALUE
+source_range_start_line(VALUE self)
+{
+    return INT2NUM(source_range_data_get(self)->start_line);
+}
+
+/*
+ * call-seq:
+ *    source_range.start_column  -> Integer
+ *
+ * Returns the 0-indexed byte column where this source range starts.
+ */
+static VALUE
+source_range_start_column(VALUE self)
+{
+    return INT2NUM(source_range_data_get(self)->start_column);
+}
+
+/*
+ * call-seq:
+ *    source_range.end_line  -> Integer
+ *
+ * Returns the 1-indexed line number where this source range ends.
+ */
+static VALUE
+source_range_end_line(VALUE self)
+{
+    return INT2NUM(source_range_data_get(self)->end_line);
+}
+
+/*
+ * call-seq:
+ *    source_range.end_column  -> Integer
+ *
+ * Returns the 0-indexed byte column where this source range ends.
+ */
+static VALUE
+source_range_end_column(VALUE self)
+{
+    return INT2NUM(source_range_data_get(self)->end_column);
+}
+
+/*
+ * call-seq:
+ *    source_range.inspect  -> String
+ *
+ * Returns a human-readable string with the absolute path, if available,
+ * otherwise the source path, and the start and end coordinates.
+ */
+static VALUE
+source_range_inspect(VALUE self)
+{
+    struct source_range_data *data = source_range_data_get(self);
+    VALUE str = rb_str_new_cstr("#<Ruby::SourceRange ");
+    VALUE path = NIL_P(data->absolute_path) ? data->path : data->absolute_path;
+
+    VM_ASSERT(!NIL_P(path));
+    rb_str_append(str, path);
+
+    rb_str_catf(str, ":(%d,%d)-(%d,%d)>",
+                data->start_line, data->start_column,
+                data->end_line, data->end_column);
+
+    return str;
+}
 
 /* Proc */
 
@@ -1543,6 +1711,22 @@ VALUE
 rb_proc_location(VALUE self)
 {
     return iseq_location(rb_proc_get_iseq(self, 0));
+}
+
+/*
+ * call-seq:
+ *    prc.source_range  -> Ruby::SourceRange or nil
+ *
+ * Returns the Ruby source range containing this proc, or +nil+ if this proc was
+ * not defined in Ruby (i.e. native) or has no source path.
+ *
+ * The returned Ruby::SourceRange includes the source path, absolute path when
+ * available, and the start and end line and byte-column coordinates.
+ */
+static VALUE
+rb_proc_source_range(VALUE self)
+{
+    return source_range_new(rb_proc_get_iseq(self, 0));
 }
 
 VALUE
@@ -3199,6 +3383,28 @@ rb_method_location(VALUE method)
     return method_def_location(rb_method_def(method));
 }
 
+static VALUE
+method_def_source_range(const rb_method_definition_t *def)
+{
+    return source_range_new(method_def_iseq(def));
+}
+
+/*
+ * call-seq:
+ *    meth.source_range  -> Ruby::SourceRange or nil
+ *
+ * Returns the Ruby source range containing this method, or +nil+ if this method
+ * was not defined in Ruby (i.e. native) or has no source path.
+ *
+ * The returned Ruby::SourceRange includes the source path, absolute path when
+ * available, and the start and end line and byte-column coordinates.
+ */
+static VALUE
+rb_method_source_range(VALUE method)
+{
+    return method_def_source_range(rb_method_def(method));
+}
+
 static const rb_method_definition_t *
 vm_proc_method_def(VALUE procval)
 {
@@ -4180,6 +4386,16 @@ proc_ruby2_keywords(VALUE procval)
  */
 
 /*
+ *  Document-class: Ruby::SourceRange
+ *
+ *  An object representing the source-code range for a Ruby callable.
+ *
+ *  Source ranges are returned by Proc#source_range, Method#source_range, and
+ *  UnboundMethod#source_range. They include the source path, absolute path when
+ *  available, and start and end line and byte-column coordinates.
+ */
+
+/*
  *  Document-class: Proc
  *
  * A +Proc+ object is an encapsulation of a block of code, which can be stored
@@ -4546,6 +4762,20 @@ void
 Init_Proc(void)
 {
 #undef rb_intern
+    VALUE mRuby = rb_define_module("Ruby");
+
+    /* Ruby::SourceRange */
+    rb_cSourceRange = rb_define_class_under(mRuby, "SourceRange", rb_cObject);
+    rb_undef_alloc_func(rb_cSourceRange);
+    rb_undef_method(CLASS_OF(rb_cSourceRange), "new");
+    rb_define_method(rb_cSourceRange, "path", source_range_path, 0);
+    rb_define_method(rb_cSourceRange, "absolute_path", source_range_absolute_path, 0);
+    rb_define_method(rb_cSourceRange, "start_line", source_range_start_line, 0);
+    rb_define_method(rb_cSourceRange, "start_column", source_range_start_column, 0);
+    rb_define_method(rb_cSourceRange, "end_line", source_range_end_line, 0);
+    rb_define_method(rb_cSourceRange, "end_column", source_range_end_column, 0);
+    rb_define_method(rb_cSourceRange, "inspect", source_range_inspect, 0);
+
     /* Proc */
     rb_cProc = rb_define_class("Proc", rb_cObject);
     rb_undef_alloc_func(rb_cProc);
@@ -4578,6 +4808,7 @@ Init_Proc(void)
     rb_define_method(rb_cProc, "==", proc_eq, 1);
     rb_define_method(rb_cProc, "eql?", proc_eq, 1);
     rb_define_method(rb_cProc, "source_location", rb_proc_location, 0);
+    rb_define_method(rb_cProc, "source_range", rb_proc_source_range, 0);
     rb_define_method(rb_cProc, "parameters", rb_proc_parameters, -1);
     rb_define_method(rb_cProc, "ruby2_keywords", proc_ruby2_keywords, 0);
     // rb_define_method(rb_cProc, "isolate", rb_proc_isolate, 0); is not accepted.
@@ -4619,6 +4850,7 @@ Init_Proc(void)
     rb_define_method(rb_cMethod, "owner", method_owner, 0);
     rb_define_method(rb_cMethod, "unbind", method_unbind, 0);
     rb_define_method(rb_cMethod, "source_location", rb_method_location, 0);
+    rb_define_method(rb_cMethod, "source_range", rb_method_source_range, 0);
     rb_define_method(rb_cMethod, "parameters", rb_method_parameters, 0);
     rb_define_method(rb_cMethod, "super_method", method_super_method, 0);
     rb_define_method(rb_mKernel, "method", rb_obj_method, 1);
@@ -4645,6 +4877,7 @@ Init_Proc(void)
     rb_define_method(rb_cUnboundMethod, "bind", umethod_bind, 1);
     rb_define_method(rb_cUnboundMethod, "bind_call", umethod_bind_call, -1);
     rb_define_method(rb_cUnboundMethod, "source_location", rb_method_location, 0);
+    rb_define_method(rb_cUnboundMethod, "source_range", rb_method_source_range, 0);
     rb_define_method(rb_cUnboundMethod, "parameters", rb_method_parameters, 0);
     rb_define_method(rb_cUnboundMethod, "super_method", method_super_method, 0);
 
