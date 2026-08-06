@@ -54,6 +54,10 @@ module ErrorHighlight
 
       return nil unless Thread::Backtrace::Location === loc
 
+      if node = prism_find_with_source_range(loc)
+        return Spotter.new(node, **opts).spot
+      end
+
       node =
         begin
           RubyVM::AbstractSyntaxTree.of(loc, keep_script_lines: true)
@@ -79,6 +83,31 @@ module ErrorHighlight
          ArgumentError # eval'ed code
 
     return nil
+  end
+
+  def self.prism_find_with_source_range(location)
+    return nil unless location.respond_to?(:source_range)
+    source_range = location.source_range
+
+    require "prism"
+
+    # We could simplify this whole method to just `Prism.find(location)` once that uses Ruby::SourceRange.
+
+    # We could also walk the AST ourselves without #tunnel but it's convenient and fast.
+    return nil unless Prism::Node.method_defined?(:tunnel)
+
+    absolute_path = source_range.absolute_path
+    return unless absolute_path
+
+    nodes = Prism.parse_file(absolute_path).value.tunnel(source_range.start_line, source_range.start_column)
+    selected = nodes.select { |n|
+      n.start_line == source_range.start_line && n.start_column == source_range.start_column &&
+        n.end_line == source_range.end_line && n.end_column == source_range.end_column
+    }
+
+    # The most deeply nested node is the one we want.
+    # There are other strategies like include or exclude list of node classes but this works well and is simple.
+    selected.last
   end
 
   # Accepts a Thread::Backtrace::Location object and returns a Prism::Node
