@@ -1249,71 +1249,33 @@ fn gen_check_ints_inline(
 ) {
     asm_comment!(asm, "RUBY_VM_CHECK_INTS(ec) - inline");
 
+    // Spill register temps to memory unconditionally so that both the fast
+    // path (no interrupt) and slow path (interrupt taken) have values in
+    // memory at the label. This avoids the need to reload after the ccall.
+    asm.spill_regs();
+
     let interrupt_flag = asm.load(Opnd::mem(32, EC, RUBY_OFFSET_EC_INTERRUPT_FLAG as i32));
     asm.test(interrupt_flag, interrupt_flag);
 
     let no_interrupt = asm.new_label("no_interrupt");
     asm.jz(no_interrupt);
 
-    // Save the compile-time context before the slow path. Instructions below
-    // (jit_save_pc, lea/mov, and especially ccall which spills register temps)
-    // modify asm.ctx at compile time. Since the fast path (jz taken) skips
-    // these instructions at runtime, we must restore ctx after the slow path
-    // so that code after the no_interrupt label compiles against the original
-    // context that matches the fast-path runtime state.
-    let saved_ctx = asm.ctx;
-
     // Like jit_prepare_non_leaf_call(), save PC and SP to CFP for backtraces
     // and GC safety, but without record_boundary_patch_point (backward branches
     // return EndBlock so the assertion in gen_single_block would fire;
     // invalidation is handled by the normal block invalidation mechanism).
     // We write SP to CFP directly instead of gen_save_sp() to avoid modifying
-    // the SP register, which is callee-saved across the ccall and must keep
-    // its original value for code after the no_interrupt label.
+    // the SP register, which must keep its original value for code after the
+    // no_interrupt label.
     jit_save_pc(jit, asm);
     let sp_addr = asm.lea(asm.ctx.sp_opnd(0));
     asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP), sp_addr);
 
     asm.ccall(rb_yjit_execute_interrupts as *const u8, vec![EC]);
 
-    // Restore the context so code after the label compiles against the
-    // original stack layout (matching the fast path). Then clear local types
-    // because the interrupt handler can set locals through Kernel#binding,
+    // The interrupt handler can set locals through Kernel#binding,
     // rb_debug_inspector API, etc. (same rationale as jit_prepare_non_leaf_call).
-    asm.ctx = saved_ctx;
     asm.ctx.clear_local_types();
-
-    // Reload register temps from memory. The ccall clobbered the caller-saved
-    // temp registers, but spill_regs() (inside ccall) already stored them to
-    // memory. Reload them so both paths arrive at the label with values in
-    // registers, matching saved_ctx's reg_mapping.
-    let reg_mapping = asm.ctx.get_reg_mapping();
-    if reg_mapping != RegMapping::default() {
-        // Temporarily clear reg_mapping so that Opnd::Stack operands
-        // (from local_opnd) resolve to memory, not to the very registers
-        // we're trying to reload.
-        asm.ctx.set_reg_mapping(RegMapping::default());
-
-        let regs = Assembler::get_temp_regs();
-        for reg_opnd in reg_mapping.get_reg_opnds() {
-            let reg_idx = reg_mapping.get_reg(reg_opnd).unwrap();
-            match reg_opnd {
-                RegOpnd::Stack(stack_idx) => {
-                    let idx = (asm.ctx.get_stack_size() - 1 - stack_idx) as i32;
-                    let mem = Opnd::mem(64, SP, (asm.ctx.get_sp_offset() as i32 - idx - 1) * SIZEOF_VALUE_I32);
-                    asm.load_into(Opnd::Reg(regs[reg_idx]), mem);
-                }
-                RegOpnd::Local(local_idx) => {
-                    let num_locals = asm.get_num_locals().unwrap();
-                    let ep_offset = num_locals + VM_ENV_DATA_SIZE - 1 - local_idx as u32;
-                    let mem = asm.local_opnd(ep_offset);
-                    asm.load_into(Opnd::Reg(regs[reg_idx]), mem);
-                }
-            }
-        }
-
-        asm.ctx.set_reg_mapping(reg_mapping);
-    }
 
     asm.write_label(no_interrupt);
 }
