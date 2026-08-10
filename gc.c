@@ -1758,6 +1758,10 @@ rb_gc_pointer_to_heap_p(VALUE obj)
 #define LAST_OBJECT_ID() (object_id_counter * OBJ_ID_INCREMENT)
 static VALUE id2ref_value = 0;
 static st_table *id2ref_tbl = NULL;
+// Reverse table for generic-field objects: owner VALUE -> object_id.
+// Needed because their object_id is stored in a companion T_IMEMO/fields,
+// and reading that imemo during sweep is tricky. [Bug #22200]
+static st_table *genfields_obj2id_tbl = NULL;
 
 #if SIZEOF_SIZE_T == SIZEOF_LONG_LONG
 static size_t object_id_counter = 1;
@@ -1780,10 +1784,17 @@ generate_next_object_id(void)
 }
 
 void
-rb_gc_obj_id_moved(VALUE obj)
+rb_gc_obj_id_moved(VALUE new_obj, VALUE old_obj)
 {
     if (UNLIKELY(id2ref_tbl)) {
-        st_insert(id2ref_tbl, (st_data_t)rb_obj_id(obj), (st_data_t)obj);
+        VALUE id = rb_obj_id(new_obj);
+        st_insert(id2ref_tbl, (st_data_t)id, (st_data_t)new_obj);
+        if (genfields_obj2id_tbl) {
+            st_delete(genfields_obj2id_tbl, (st_data_t *)&old_obj, NULL);
+            if (rb_obj_gen_fields_p(new_obj)) {
+                st_insert(genfields_obj2id_tbl, (st_data_t)new_obj, (st_data_t)id);
+            }
+        }
     }
 }
 
@@ -1835,6 +1846,11 @@ id2ref_tbl_free(void *data)
     id2ref_tbl = NULL; // clear global ref
     st_table *table = (st_table *)data;
     st_free_table(table);
+
+    if (genfields_obj2id_tbl) {
+        st_free_table(genfields_obj2id_tbl);
+        genfields_obj2id_tbl = NULL;
+    }
 }
 
 static const rb_data_type_t id2ref_tbl_type = {
@@ -1910,6 +1926,9 @@ object_id0(VALUE obj)
     if (RB_UNLIKELY(id2ref_tbl)) {
         RB_VM_LOCKING() {
             st_insert(id2ref_tbl, (st_data_t)id, (st_data_t)obj);
+            if (rb_obj_gen_fields_p(obj)) {
+                st_insert(genfields_obj2id_tbl, (st_data_t)obj, (st_data_t)id);
+            }
         }
     }
     return id;
@@ -1958,7 +1977,10 @@ build_id2ref_i(VALUE obj, void *data)
       case T_IMEMO:
         RUBY_ASSERT(!rb_objspace_garbage_object_p(obj));
         if (IMEMO_TYPE_P(obj, imemo_fields) && rb_shape_obj_has_id(obj)) {
-            st_insert(id2ref_tbl, rb_obj_id(obj), rb_imemo_fields_owner(obj));
+            VALUE owner = rb_imemo_fields_owner(obj);
+            VALUE id = rb_obj_id(obj);
+            st_insert(id2ref_tbl, id, owner);
+            st_insert(genfields_obj2id_tbl, (st_data_t)owner, (st_data_t)id);
         }
         break;
       case T_OBJECT:
@@ -1996,6 +2018,7 @@ object_id_to_ref(void *objspace_ptr, VALUE object_id)
         {
             id2ref_tbl = tmp_id2ref_tbl;
             id2ref_value = tmp_id2ref_value;
+            genfields_obj2id_tbl = st_init_numtable();
 
             rb_gc_impl_each_object(objspace, build_id2ref_i, (void *)id2ref_tbl);
         }
@@ -2033,7 +2056,19 @@ obj_free_object_id(VALUE obj)
             if (!IMEMO_TYPE_P(obj, imemo_fields)) {
                 return;
             }
-            // fallthrough
+            {
+            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
+            if (rb_shape_has_object_id(shape_id)) {
+                obj_id = object_id_get(obj, shape_id);
+                // Also clean up the reverse table so the owner's
+                // sweep won't try to delete the same id2ref entry.
+                if (genfields_obj2id_tbl) {
+                    VALUE owner = rb_imemo_fields_owner(obj);
+                    st_delete(genfields_obj2id_tbl, (st_data_t *)&owner, NULL);
+                }
+            }
+            break;
+          }
           case T_OBJECT:
             {
             shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
@@ -2043,8 +2078,18 @@ obj_free_object_id(VALUE obj)
             break;
           }
           default:
-            // For generic_fields, the T_IMEMO/fields is responsible for freeing the id.
-            return;
+          {
+            // Generic-field types (String, Array, Hash, etc.) store their
+            // object_id in a companion T_IMEMO/fields. Use the reverse
+            // table to look up the object_id without reading the imemo,
+            // which may already have been swept. [Bug #22200]
+            st_data_t id;
+            if (genfields_obj2id_tbl &&
+                st_delete(genfields_obj2id_tbl, (st_data_t *)&obj, &id)) {
+                obj_id = (VALUE)id;
+            }
+            break;
+          }
         }
 
         if (RB_UNLIKELY(obj_id)) {
@@ -3892,7 +3937,16 @@ vm_weak_table_id2ref_foreach_update(st_data_t *key, st_data_t *value, st_data_t 
 {
     struct global_vm_table_foreach_data *iter_data = (struct global_vm_table_foreach_data *)data;
 
+    VALUE old_value = (VALUE)*value;
     iter_data->update_callback((VALUE *)value, iter_data->data);
+
+    if (genfields_obj2id_tbl && old_value != (VALUE)*value) {
+        st_data_t old_key = old_value;
+        st_data_t id;
+        if (st_delete(genfields_obj2id_tbl, &old_key, &id)) {
+            st_insert(genfields_obj2id_tbl, *value, id);
+        }
+    }
 
     if (!iter_data->weak_only && !FIXNUM_P((VALUE)*key)) {
         iter_data->update_callback((VALUE *)key, iter_data->data);
