@@ -750,17 +750,24 @@ fn verify_ctx(jit: &JITState, ctx: &Context) {
 
     // Verify stack operand types
     let top_idx = cmp::min(ctx.get_stack_size(), MAX_CTX_TEMPS as u8);
+    let reg_mapping = ctx.get_reg_mapping();
     for i in 0..top_idx {
         let learned_mapping = ctx.get_opnd_mapping(StackOpnd(i));
         let learned_type = ctx.get_opnd_type(StackOpnd(i));
         let learned_type = relax_type_with_singleton_class_assumption(learned_type);
+
+        // When a stack slot is register-mapped, peek_at_stack reads from
+        // memory which may be stale (the live value is in a register).
+        // Skip all checks that rely on the memory value for such slots.
+        let stack_idx = ctx.get_stack_size() - 1 - i;
+        let in_reg = reg_mapping.get_reg(RegOpnd::Stack(stack_idx)).is_some();
 
         let stack_val = jit.peek_at_stack(ctx, i as isize);
         let val_type = Type::from(stack_val);
 
         match learned_mapping {
             TempMapping::MapToSelf => {
-                if self_val != stack_val {
+                if !in_reg && self_val != stack_val {
                     panic!(
                         "verify_ctx: stack value was mapped to self, but values did not match!\n  stack: {}\n  self: {}",
                         obj_info_str(stack_val),
@@ -769,21 +776,23 @@ fn verify_ctx(jit: &JITState, ctx: &Context) {
                 }
             }
             TempMapping::MapToLocal(local_idx) => {
-                let local_val = jit.peek_at_local(local_idx.into());
-                if local_val != stack_val {
-                    panic!(
-                        "verify_ctx: stack value was mapped to local, but values did not match\n  stack: {}\n  local {}: {}",
-                        obj_info_str(stack_val),
-                        local_idx,
-                        obj_info_str(local_val)
-                    );
+                if !in_reg {
+                    let local_val = jit.peek_at_local(local_idx.into());
+                    if local_val != stack_val {
+                        panic!(
+                            "verify_ctx: stack value was mapped to local, but values did not match\n  stack: {}\n  local {}: {}",
+                            obj_info_str(stack_val),
+                            local_idx,
+                            obj_info_str(local_val)
+                        );
+                    }
                 }
             }
             TempMapping::MapToStack(_) => {}
         }
 
         // If the actual type differs from the learned type
-        if val_type.diff(learned_type) == TypeDiff::Incompatible {
+        if !in_reg && val_type.diff(learned_type) == TypeDiff::Incompatible {
             panic!(
                 "verify_ctx: ctx type ({:?}) incompatible with actual value on stack: {} ({:?})",
                 learned_type,
