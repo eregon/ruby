@@ -1254,22 +1254,21 @@ fn gen_check_ints_inline(
     // memory at the label. This avoids the need to reload after the ccall.
     asm.spill_regs();
 
+    // Save SP before the branch so both paths have the same SP state.
+    // gen_save_sp() also updates the SP register (x21 on arm64) and resets
+    // sp_offset to 0, which keeps CFP.sp consistent with x21 + sp_offset.
+    // Without this, writing sp_opnd(0) to CFP.sp in the slow path would
+    // desync CFP.sp from the (x21, sp_offset) pair, causing branch_stub_hit
+    // to compute the wrong reconned_sp.
+    gen_save_sp(asm);
+
     let interrupt_flag = asm.load(Opnd::mem(32, EC, RUBY_OFFSET_EC_INTERRUPT_FLAG as i32));
     asm.test(interrupt_flag, interrupt_flag);
 
     let no_interrupt = asm.new_label("no_interrupt");
     asm.jz(no_interrupt);
 
-    // Like jit_prepare_non_leaf_call(), save PC and SP to CFP for backtraces
-    // and GC safety, but without record_boundary_patch_point (backward branches
-    // return EndBlock so the assertion in gen_single_block would fire;
-    // invalidation is handled by the normal block invalidation mechanism).
-    // We write SP to CFP directly instead of gen_save_sp() to avoid modifying
-    // the SP register, which must keep its original value for code after the
-    // no_interrupt label.
     jit_save_pc(jit, asm);
-    let sp_addr = asm.lea(asm.ctx.sp_opnd(0));
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP), sp_addr);
 
     asm.ccall(rb_yjit_execute_interrupts as *const u8, vec![EC]);
 
