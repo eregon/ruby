@@ -6225,6 +6225,66 @@ pm_compile_constant_path_operator_write_node(rb_iseq_t *iseq, const pm_constant_
 #define PM_CONTAINER_P(node) (PM_NODE_TYPE_P(node, PM_ARRAY_NODE) || PM_NODE_TYPE_P(node, PM_HASH_NODE) || PM_NODE_TYPE_P(node, PM_RANGE_NODE))
 
 /**
+ * A bare `nil` in the tail (value) position of a method body is the method's
+ * implicit `nil` return. The parse.y compiler eliminates it entirely (the
+ * method body becomes NULL), so it never emits a line event for it. Prism keeps
+ * the explicit nil node with its newline flag set, which would emit a spurious
+ * line event that the other parser does not. To match parse.y, walk the tail
+ * (value) positions of the method body and clear the newline flag from any bare
+ * nil found there, recursing through the branches of conditionals that are
+ * themselves in tail position.
+ */
+static void
+pm_compile_defn_clear_tail_nil_newline(const pm_node_t *node)
+{
+    if (node == NULL) return;
+
+    switch (PM_NODE_TYPE(node)) {
+      case PM_NIL_NODE:
+        ((pm_node_t *) node)->flags &= (pm_node_flags_t) ~PM_NODE_FLAG_NEWLINE;
+        break;
+      case PM_STATEMENTS_NODE: {
+        const pm_statements_node_t *cast = (const pm_statements_node_t *) node;
+        if (cast->body.size > 0) {
+            pm_compile_defn_clear_tail_nil_newline(cast->body.nodes[cast->body.size - 1]);
+        }
+        break;
+      }
+      case PM_PARENTHESES_NODE:
+        pm_compile_defn_clear_tail_nil_newline(((const pm_parentheses_node_t *) node)->body);
+        break;
+      case PM_IF_NODE: {
+        const pm_if_node_t *cast = (const pm_if_node_t *) node;
+        pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) cast->statements);
+        pm_compile_defn_clear_tail_nil_newline(cast->subsequent);
+        break;
+      }
+      case PM_UNLESS_NODE: {
+        const pm_unless_node_t *cast = (const pm_unless_node_t *) node;
+        pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) cast->statements);
+        pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) cast->else_clause);
+        break;
+      }
+      case PM_ELSE_NODE:
+        pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) ((const pm_else_node_t *) node)->statements);
+        break;
+      case PM_CASE_NODE: {
+        const pm_case_node_t *cast = (const pm_case_node_t *) node;
+        const pm_node_t *condition;
+        PM_NODE_LIST_FOREACH(&cast->conditions, index, condition) {
+            if (PM_NODE_TYPE_P(condition, PM_WHEN_NODE)) {
+                pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) ((const pm_when_node_t *) condition)->statements);
+            }
+        }
+        pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) cast->else_clause);
+        break;
+      }
+      default:
+        break;
+    }
+}
+
+/**
  * Compile a scope node, which is a special kind of node that represents a new
  * lexical scope, attached to a node in the AST.
  */
@@ -7111,6 +7171,10 @@ pm_compile_scope_node(rb_iseq_t *iseq, pm_scope_node_t *scope_node, const pm_nod
         PUSH_TRACE(ret, RUBY_EVENT_CALL);
 
         if (scope_node->body) {
+            // A bare `nil` in the method's tail (value) position is the implicit
+            // `nil` return; parse.y elides it and emits no line event for it, so
+            // clear its newline flag to match.
+            pm_compile_defn_clear_tail_nil_newline((const pm_node_t *) scope_node->body);
             PM_COMPILE((const pm_node_t *) scope_node->body);
         }
         else {
