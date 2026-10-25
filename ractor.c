@@ -25,6 +25,7 @@
 #include "internal/ractor.h"
 #include "internal/rational.h"
 #include "internal/re.h"
+#include "internal/set.h"
 #include "internal/struct.h"
 #include "internal/st.h"
 #include "internal/thread.h"
@@ -1659,6 +1660,19 @@ obj_hash_traverse_i(VALUE key, VALUE val, VALUE ptr)
     return ST_CONTINUE;
 }
 
+static int
+obj_set_traverse_i(VALUE element, VALUE ptr)
+{
+    struct obj_traverse_callback_data *d = (struct obj_traverse_callback_data *)ptr;
+
+    if (obj_traverse_i(element, d->data)) {
+        d->stop = true;
+        return ST_STOP;
+    }
+
+    return ST_CONTINUE;
+}
+
 static void
 obj_traverse_reachable_i(VALUE obj, void *ptr)
 {
@@ -1673,11 +1687,9 @@ obj_traverse_reachable_i(VALUE obj, void *ptr)
     // If the object is "garbage" (unmarked during lazy sweeping), it's okay
     // to traverse it.
 
-    // The GC also reports the class of the object being traversed, once and
-    // before the other references; skip it. Later occurrences are references
-    // from the object itself (e.g. a Set containing its own class).
+    // The GC also reports the class of the object being traversed. It is not
+    // a reference held by the object's contents, so skip it.
     if (obj == d->klass) {
-        d->klass = Qundef;
         return;
     }
 
@@ -1809,7 +1821,17 @@ obj_traverse_i(VALUE obj, struct obj_traverse_data *data)
         break;
 
       case T_DATA:
-        {
+        if (rb_set_p(obj)) {
+            // Visit the elements directly, like Hash keys, rather than through
+            // the mark function.
+            struct obj_traverse_callback_data d = {
+                .stop = false,
+                .data = data,
+            };
+            rb_set_foreach(obj, obj_set_traverse_i, (VALUE)&d);
+            if (d.stop) return 1;
+        }
+        else {
             void *const ptr = RTYPEDDATA_GET_DATA(obj);
             const rb_data_type_t *type = RTYPEDDATA_TYPE(obj);
 
