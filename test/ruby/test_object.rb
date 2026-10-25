@@ -152,6 +152,211 @@ class TestObject < Test::Unit::TestCase
     }
   end
 
+  def test_deep_freeze
+    config = {
+      db: { host: "localhost".dup, ports: [5432] },
+      flags: [:a, :b],
+    }
+    assert_same(config, config.deep_freeze)
+    assert_predicate(config, :frozen?)
+    assert_predicate(config[:db], :frozen?)
+    assert_predicate(config[:db][:host], :frozen?)
+    assert_predicate(config[:db][:ports], :frozen?)
+    assert_predicate(config[:flags], :frozen?)
+  end
+
+  def test_deep_freeze_immediate
+    assert_nil(nil.deep_freeze)
+    assert_equal(1, 1.deep_freeze)
+    assert_equal(:sym, :sym.deep_freeze)
+    assert_equal(true, true.deep_freeze)
+  end
+
+  def test_deep_freeze_instance_variables
+    klass = Class.new do
+      attr_reader :a, :b
+      def initialize(a, b)
+        @a = a
+        @b = b
+      end
+    end
+    inner = Object.new
+    obj = klass.new("str".dup, inner)
+    obj.deep_freeze
+    assert_predicate(obj, :frozen?)
+    assert_predicate(obj.a, :frozen?)
+    assert_predicate(inner, :frozen?)
+    refute_predicate(klass, :frozen?)
+  end
+
+  def test_deep_freeze_cyclic
+    a = []
+    a << a
+    h = { a: a }
+    a << h
+    a.deep_freeze
+    assert_predicate(a, :frozen?)
+    assert_predicate(h, :frozen?)
+  end
+
+  def test_deep_freeze_struct_data_set_range
+    st = Struct.new(:x).new("x".dup)
+    st.deep_freeze
+    assert_predicate(st, :frozen?)
+    assert_predicate(st.x, :frozen?)
+
+    data = Data.define(:x).new(x: "x".dup)
+    data.deep_freeze
+    assert_predicate(data.x, :frozen?)
+
+    elem = Object.new
+    set = Set[elem]
+    set.deep_freeze
+    assert_predicate(set, :frozen?)
+    assert_predicate(elem, :frozen?)
+
+    range = ("a".dup).."z".dup
+    range.deep_freeze
+    assert_predicate(range.begin, :frozen?)
+    assert_predicate(range.end, :frozen?)
+
+    h = Hash.new { |hash, k| k }
+    k = Object.new # a String key would be copied and frozen by Hash#[]=
+    v = "v".dup
+    h[k] = v
+    h.deep_freeze
+    assert_predicate(h, :frozen?)
+    assert_predicate(k, :frozen?)
+    assert_predicate(v, :frozen?)
+    assert_predicate(h.default_proc, :frozen?)
+  end
+
+  def test_deep_freeze_class_and_module
+    klass = Class.new
+    klass.const_set(:CONST, "const".dup)
+    klass.instance_variable_set(:@ivar, "ivar".dup)
+    klass.deep_freeze
+    assert_predicate(klass, :frozen?)
+    refute_predicate(klass::CONST, :frozen?)
+    refute_predicate(klass.instance_variable_get(:@ivar), :frozen?)
+    refute_predicate(Object, :frozen?)
+
+    mod = Module.new
+    mod.const_set(:CONST, "const".dup)
+    [mod].deep_freeze
+    assert_predicate(mod, :frozen?)
+    refute_predicate(mod::CONST, :frozen?)
+
+    assert_not_predicate(Comparable, :frozen?)
+    Class.new { include Comparable }.new.deep_freeze
+    assert_not_predicate(Comparable, :frozen?)
+  end
+
+  def test_deep_freeze_thread_fiber_proc
+    str = "str".dup
+    th = Thread.new { str }
+    th.instance_variable_set(:@ivar, str)
+    th.deep_freeze
+    assert_predicate(th, :frozen?)
+    refute_predicate(str, :frozen?)
+    assert_same(str, th.value)
+
+    fiber = Fiber.new { str }
+    fiber.deep_freeze
+    assert_predicate(fiber, :frozen?)
+    refute_predicate(str, :frozen?)
+    assert_same(str, fiber.resume)
+
+    obj = Object.new
+    pr = proc { [str, obj] }
+    pr.deep_freeze
+    assert_predicate(pr, :frozen?)
+    refute_predicate(str, :frozen?)
+    refute_predicate(obj, :frozen?)
+    assert_predicate(method(:test_deep_freeze_thread_fiber_proc).deep_freeze, :frozen?)
+  end
+
+  def test_deep_freeze_io
+    IO.pipe do |r, w|
+      r.instance_variable_set(:@ivar, "str".dup)
+      r.deep_freeze
+      assert_predicate(r, :frozen?)
+      refute_predicate(r.instance_variable_get(:@ivar), :frozen?)
+    end
+  end
+
+  def test_deep_freeze_calls_freeze
+    freeze_calls = 0
+    klass = Class.new do
+      attr_reader :samples
+      def initialize(samples)
+        @samples = samples
+      end
+
+      define_method(:freeze) do
+        freeze_calls += 1
+        @mean = @samples.sum / @samples.size.to_f
+        super()
+      end
+
+      def mean
+        @mean ||= @samples.sum / @samples.size.to_f
+      end
+    end
+    stats = klass.new([1.0, 2.0, 3.0])
+    [stats].deep_freeze
+    assert_equal(1, freeze_calls)
+    assert_equal(2.0, stats.mean)
+    assert_predicate(stats.samples, :frozen?)
+
+    # #freeze is not called on already frozen objects
+    frozen = klass.new([1.0]).freeze
+    assert_equal(2, freeze_calls)
+    [frozen].deep_freeze
+    assert_equal(2, freeze_calls)
+  end
+
+  def test_deep_freeze_freeze_does_not_freeze
+    klass = Class.new do
+      def freeze
+        self
+      end
+    end
+    obj = klass.new
+    assert_raise_with_message(RuntimeError, "#freeze does not freeze object correctly") {
+      [obj].deep_freeze
+    }
+  end
+
+  def test_deep_freeze_freeze_raises
+    klass = Class.new do
+      def freeze
+        raise "boom"
+      end
+    end
+    first = "first".dup
+    obj = klass.new
+    ary = [first, obj]
+    assert_raise_with_message(RuntimeError, "boom") { ary.deep_freeze }
+    # objects visited before the exception are frozen
+    assert_predicate(ary, :frozen?)
+    assert_predicate(first, :frozen?)
+    refute_predicate(obj, :frozen?)
+  end
+
+  def test_deep_freeze_already_frozen_traversed
+    inner = "inner".dup
+    ary = [inner].freeze
+    ary.deep_freeze
+    assert_predicate(inner, :frozen?)
+  end
+
+  def test_deep_freeze_make_shareable
+    obj = [Object.new, "str".dup, { a: [1] }].deep_freeze
+    assert_same(obj, Ractor.make_shareable(obj))
+    assert_equal(true, Ractor.shareable?(obj))
+  end
+
   def test_nil_to_f
     assert_equal(0.0, nil.to_f)
   end
