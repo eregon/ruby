@@ -99,6 +99,18 @@ ruby_version_is "4.1" do
       klass.should_not.frozen?
     end
 
+    it "does not freeze the class of a Set" do
+      klass = Class.new(Set)
+      klass[Object.new].deep_freeze
+      klass.should_not.frozen?
+    end
+
+    it "freezes the class of a Set if it is an element of the Set" do
+      klass = Class.new(Set)
+      klass[klass].deep_freeze
+      klass.should.frozen?
+    end
+
     it "freezes a class or module which is the receiver but does not traverse it" do
       klass = Class.new
       klass.const_set(:CONST, +"const")

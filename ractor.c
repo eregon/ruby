@@ -1636,6 +1636,7 @@ struct obj_traverse_data {
 struct obj_traverse_callback_data {
     bool stop;
     struct obj_traverse_data *data;
+    VALUE klass;
 };
 
 static int obj_traverse_i(VALUE obj, struct obj_traverse_data *data);
@@ -1672,6 +1673,14 @@ obj_traverse_reachable_i(VALUE obj, void *ptr)
     // If the object is "garbage" (unmarked during lazy sweeping), it's okay
     // to traverse it.
 
+    // The GC also reports the class of the object being traversed, once and
+    // before the other references; skip it. Later occurrences are references
+    // from the object itself (e.g. a Set containing its own class).
+    if (obj == d->klass) {
+        d->klass = Qundef;
+        return;
+    }
+
     if (obj_traverse_i(obj, d->data)) {
         d->stop = true;
     }
@@ -1684,6 +1693,7 @@ obj_traverse_reachable(VALUE obj, struct obj_traverse_data *data)
     struct obj_traverse_callback_data d = {
         .stop = false,
         .data = data,
+        .klass = RBASIC_CLASS(obj),
     };
     rb_objspace_reachable_objects_from_local(obj, obj_traverse_reachable_i, &d);
     return d.stop;
@@ -1735,7 +1745,7 @@ obj_traverse_i(VALUE obj, struct obj_traverse_data *data)
             .stop = false,
             .data = data,
         };
-        rb_ivar_foreach(obj, obj_traverse_ivar_foreach_i, (st_data_t)&d);
+        rb_ivar_foreach_buffered(obj, obj_traverse_ivar_foreach_i, (st_data_t)&d);
         if (d.stop) return 1;
     }
 

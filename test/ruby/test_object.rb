@@ -231,6 +231,38 @@ class TestObject < Test::Unit::TestCase
     assert_predicate(h.default_proc, :frozen?)
   end
 
+  def test_deep_freeze_does_not_freeze_class_of_typed_data
+    set_class = Class.new(Set)
+    set_class[Object.new].deep_freeze
+    refute_predicate(set_class, :frozen?)
+  end
+
+  def test_deep_freeze_typed_data_containing_its_class
+    set_class = Class.new(Set)
+    set_class[set_class].deep_freeze
+    assert_predicate(set_class, :frozen?)
+  end
+
+  def test_deep_freeze_shape_change_during_traversal
+    parent = nil
+    klass = Class.new do
+      define_method(:freeze) do
+        parent.object_id
+        super()
+      end
+    end
+
+    parent = Object.new
+    parent.instance_variable_set(:@a, klass.new)
+    parent.deep_freeze
+    assert_predicate(parent.instance_variable_get(:@a), :frozen?)
+
+    parent = Object.new
+    parent.instance_variable_set(:@a, klass.new)
+    Ractor.make_shareable(parent)
+    assert_predicate(parent.instance_variable_get(:@a), :frozen?)
+  end
+
   def test_deep_freeze_class_and_module
     klass = Class.new
     klass.const_set(:CONST, "const".dup)
