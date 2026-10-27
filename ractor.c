@@ -1637,7 +1637,6 @@ struct obj_traverse_data {
 struct obj_traverse_callback_data {
     bool stop;
     struct obj_traverse_data *data;
-    VALUE klass;
 };
 
 static int obj_traverse_i(VALUE obj, struct obj_traverse_data *data);
@@ -1687,27 +1686,22 @@ obj_traverse_reachable_i(VALUE obj, void *ptr)
     // If the object is "garbage" (unmarked during lazy sweeping), it's okay
     // to traverse it.
 
-    // The GC also reports the class of the object being traversed. It is not
-    // a reference held by the object's contents, so skip it.
-    if (obj == d->klass) {
-        return;
-    }
-
     if (obj_traverse_i(obj, d->data)) {
         d->stop = true;
     }
 }
 
-// Traverse obj's children via its GC mark function. Returns 1 to stop.
+typedef void rb_reachable_objects_func(VALUE obj, void (func)(VALUE, void *), void *data);
+
+// Traverse obj's children as reported by the given GC walk. Returns 1 to stop.
 static int
-obj_traverse_reachable(VALUE obj, struct obj_traverse_data *data)
+obj_traverse_reachable(VALUE obj, struct obj_traverse_data *data, rb_reachable_objects_func *reachable)
 {
     struct obj_traverse_callback_data d = {
         .stop = false,
         .data = data,
-        .klass = RBASIC_CLASS(obj),
     };
-    rb_objspace_reachable_objects_from_local(obj, obj_traverse_reachable_i, &d);
+    reachable(obj, obj_traverse_reachable_i, &d);
     return d.stop;
 }
 
@@ -1846,14 +1840,16 @@ obj_traverse_i(VALUE obj, struct obj_traverse_data *data)
                 }
             }
             else {
-                if (obj_traverse_reachable(obj, data)) return 1;
+                // Only what the dmark function marks: not the class (which
+                // rb_gc_mark_children also reports), nor the fields object.
+                if (obj_traverse_reachable(obj, data, rb_objspace_reachable_objects_from_data_mark)) return 1;
             }
         }
         break;
 
       case T_IMEMO:
         // TODO: Not sure this can actually happen; traverse rather than crash.
-        if (obj_traverse_reachable(obj, data)) return 1;
+        if (obj_traverse_reachable(obj, data, rb_objspace_reachable_objects_from_local)) return 1;
         break;
 
       // unreachable

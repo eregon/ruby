@@ -1248,8 +1248,8 @@ class TestRactor < Test::Unit::TestCase
     GC.start
   end
 
-  # The GC mark function also reports the object's class, which must not be made part of
-  # the traversal (it would be frozen by Kernel#deep_freeze).
+  # rb_gc_mark_children also reports the object's class; the traversal must only follow
+  # the references of the dmark function (the class would be frozen by Kernel#deep_freeze).
   def test_make_shareable_data_does_not_traverse_class
     require '-test-/gc/writebarrier'
     box_class = Class.new(Bug::GC::WriteBarrier::Box)

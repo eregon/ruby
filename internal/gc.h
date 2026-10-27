@@ -286,6 +286,7 @@ void rb_gc_after_fork(rb_pid_t pid);
 } while (0)
 
 void rb_objspace_reachable_objects_from_local(VALUE obj, void (func)(VALUE, void *), void *data);
+void rb_objspace_reachable_objects_from_data_mark(VALUE obj, void (func)(VALUE, void *), void *data);
 
 #if USE_MODULAR_GC
 RUBY_SYMBOL_EXPORT_BEGIN

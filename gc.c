@@ -3795,6 +3795,28 @@ rb_gc_move_obj_during_marking(VALUE from, VALUE to)
     }
 }
 
+/* Mark the references of a T_DATA's payload: the ones its dmark function marks, or the
+ * ones its offset list declares (RUBY_TYPED_DECL_MARKING). Not the class, nor the
+ * fields object. */
+static void
+gc_mark_data_references(const struct rb_gc_mark_ctx *ctx, VALUE obj)
+{
+    void *const ptr = RTYPEDDATA_GET_DATA(obj);
+    if (!ptr) return;
+
+    if (gc_declarative_marking_p(RTYPEDDATA_TYPE(obj))) {
+        size_t *offset_list = TYPED_DATA_REFS_OFFSET_LIST(obj);
+
+        for (size_t offset = *offset_list; offset != RUBY_REF_END; offset = *offset_list++) {
+            gc_mark_internal(ctx, *(VALUE *)((char *)ptr + offset));
+        }
+    }
+    else {
+        RUBY_DATA_FUNC mark_func = RTYPEDDATA_TYPE(obj)->function.dmark;
+        if (mark_func) (*mark_func)(ptr);
+    }
+}
+
 static void
 gc_mark_children_ctx(const struct rb_gc_mark_ctx *ctx, VALUE obj)
 {
@@ -3897,27 +3919,10 @@ gc_mark_children_ctx(const struct rb_gc_mark_ctx *ctx, VALUE obj)
         }
         break;
 
-      case T_DATA: {
-        void *const ptr = RTYPEDDATA_GET_DATA(obj);
-
+      case T_DATA:
         gc_mark_internal(ctx, RTYPEDDATA(obj)->fields_obj);
-
-        if (ptr) {
-            if (gc_declarative_marking_p(RTYPEDDATA_TYPE(obj))) {
-                size_t *offset_list = TYPED_DATA_REFS_OFFSET_LIST(obj);
-
-                for (size_t offset = *offset_list; offset != RUBY_REF_END; offset = *offset_list++) {
-                    gc_mark_internal(ctx, *(VALUE *)((char *)ptr + offset));
-                }
-            }
-            else {
-                RUBY_DATA_FUNC mark_func = RTYPEDDATA_TYPE(obj)->function.dmark;
-                if (mark_func) (*mark_func)(ptr);
-            }
-        }
-
+        gc_mark_data_references(ctx, obj);
         break;
-      }
 
       case T_OBJECT: {
         shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
@@ -5850,6 +5855,19 @@ ruby_gc_set_params(void)
     rb_gc_impl_set_params(rb_gc_get_objspace());
 }
 
+static void
+reachable_mark_children(VALUE obj)
+{
+    rb_gc_mark_children(rb_gc_get_objspace(), obj);
+}
+
+static void
+reachable_mark_data_references(VALUE obj)
+{
+    const struct rb_gc_mark_ctx ctx = gc_current_mark_ctx();
+    gc_mark_data_references(&ctx, obj);
+}
+
 /* Walk obj's outgoing references, handing each child to `func` instead of marking it.
  * The walk is one level deep: it never descends into a child (no mark stack). Callers
  * wanting the whole graph must recurse it themselves. A child living in another Ractor's
@@ -5859,7 +5877,8 @@ ruby_gc_set_params(void)
  * of whether `can_run_ruby` is true, you may allocate Ruby objects in the callback function.
  */
 static void
-reachable_objects_from_body(VALUE obj, void (func)(VALUE, void *), void *data, bool can_run_ruby)
+reachable_objects_from_body(VALUE obj, void (func)(VALUE, void *), void *data, bool can_run_ruby,
+                            void (*mark)(VALUE))
 {
     if (rb_gc_impl_during_gc_p(rb_gc_get_objspace()))
         rb_bug("rb_objspace_reachable_objects_from() is not supported while during GC");
@@ -5881,7 +5900,7 @@ reachable_objects_from_body(VALUE obj, void (func)(VALUE, void *), void *data, b
 
             EC_PUSH_TAG(ec);
             if ((state = EC_EXEC_TAG()) == TAG_NONE) {
-                rb_gc_mark_children(rb_gc_get_objspace(), obj);
+                mark(obj);
             }
             EC_POP_TAG();
 
@@ -5890,7 +5909,7 @@ reachable_objects_from_body(VALUE obj, void (func)(VALUE, void *), void *data, b
             if (state != TAG_NONE) EC_JUMP_TAG(ec, state);
         }
         else {
-            rb_gc_mark_children(rb_gc_get_objspace(), obj);
+            mark(obj);
             *mfdp = prev_mfd;
         }
     }
@@ -5909,7 +5928,7 @@ reachable_objects_from_body(VALUE obj, void (func)(VALUE, void *), void *data, b
 void
 rb_objspace_reachable_objects_from_unlocked(VALUE obj, void (func)(VALUE, void *), void *data)
 {
-    reachable_objects_from_body(obj, func, data, false);
+    reachable_objects_from_body(obj, func, data, false, reachable_mark_children);
 }
 
 /* Unlocked walk of an object owned by the current Ractor. Because no lock is held, func
@@ -5925,7 +5944,23 @@ rb_objspace_reachable_objects_from_local(VALUE obj, void (func)(VALUE, void *), 
                rb_obj_info(obj));
     }
 
-    reachable_objects_from_body(obj, func, data, true);
+    reachable_objects_from_body(obj, func, data, true, reachable_mark_children);
+}
+
+/* Like rb_objspace_reachable_objects_from_local(), but walks only the references of the
+ * T_DATA's payload: what its dmark function marks (or its offset list declares). The
+ * class and the fields object, which rb_gc_mark_children() also reports, are left out. */
+void
+rb_objspace_reachable_objects_from_data_mark(VALUE obj, void (func)(VALUE, void *), void *data)
+{
+    RUBY_ASSERT(RB_TYPE_P(obj, T_DATA));
+    ASSERT_vm_unlocking();
+    if (rb_objspace_foreign_object_p(obj)) {
+        rb_bug("rb_objspace_reachable_objects_from_data_mark: %s is owned by another Ractor",
+               rb_obj_info(obj));
+    }
+
+    reachable_objects_from_body(obj, func, data, true, reachable_mark_data_references);
 }
 
 /* Walk obj's outgoing references, where obj may be owned by another Ractor (a
@@ -5939,7 +5974,7 @@ void
 rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *data)
 {
     RB_VM_LOCKING() {
-        reachable_objects_from_body(obj, func, data, false);
+        reachable_objects_from_body(obj, func, data, false, reachable_mark_children);
     }
 }
 
